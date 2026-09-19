@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Commercial Utility & Energy Tracker</title>
+    <style>
+        body { font-family: Arial, sans-serif; background-color: #f0f2f5; margin: 0; padding: 30px; }
+        .container { max-width: 950px; margin: auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        h1, h2 { color: #2c3e50; text-align: center; }
+        
+        /* Filter Bar */
+        .filter-section { background: #e9ecef; padding: 15px; border-radius: 6px; margin-bottom: 25px; display: flex; justify-content: space-between; align-items: center; }
+        .filter-section label { font-weight: bold; color: #333; }
+        .filter-section input { padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+        .btn-clear { padding: 8px 12px; background-color: #6c757d; color: white; text-decoration: none; border-radius: 4px; font-size: 13px; }
+        .btn-clear:hover { background-color: #5a6268; }
+
+        /* Form Styling */
+        form { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 30px; background: #fdfdfd; padding: 20px; border: 1px solid #e1e4e8; border-radius: 6px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group.full-width { grid-column: span 2; }
+        label { font-weight: bold; margin-bottom: 5px; color: #333; font-size: 14px; }
+        input { padding: 10px; border: 1px solid #ccc; border-radius: 4px; font-size: 14px; }
+        button { grid-column: span 2; padding: 12px; background-color: #007bff; color: white; border: none; border-radius: 4px; font-size: 16px; cursor: pointer; font-weight: bold; }
+        button:hover { background-color: #0056b3; }
+        .helper-text { font-size: 11px; color: #666; margin-top: 3px; }
+
+        /* Table Styling */
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { padding: 12px; text-align: center; border-bottom: 1px solid #ddd; font-size: 13px; }
+        th { background-color: #2c3e50; color: white; }
+        tr:hover { background-color: #f1f1f1; }
+        .no-data { text-align: center; color: #777; padding: 20px; }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Commercial Building Utility Tracker</h1>
+
+        <!-- Month/Year Filter Section -->
+        <div class="filter-section">
+            <form method="GET" action="/" style="display: contents; background: none; border: none; padding: 0; margin: 0;">
+                <div>
+                    <label for="month-filter">Filter by Month & Year:</label>
+                    <input type="month" id="month-filter" name="month" value="{{ selected_month }}" onchange="this.form.submit()">
+                </div>
+                {% if selected_month %}
+                <div>
+                    <a href="/" class="btn-clear">Clear Filter</a>
+                </div>
+                {% endif %}
+            </form>
+        </div>
+
+        <!-- Data Entry Form -->
+        <form action="/add" method="POST">
+            <div class="form-group full-width">
+                <label for="date">Meter Reading Date:</label>
+                <input type="date" id="date" name="date" required {% if not selected_month %}disabled title="Please select a Month & Year filter above first."{% endif %}>
+                {% if not selected_month %}
+                <small style="color: #d9534f; margin-top: 4px;">* Please select a Month & Year filter above to enable data entry.</small>
+                {% endif %}
+            </div>
+            
+            <div class="form-group">
+                <label for="electricity">Electricity Meter Register:</label>
+                <input type="number" step="1" id="electricity" name="electricity" placeholder="e.g., 125000" required {% if not selected_month %}disabled{% endif %}>
+                <span class="helper-text">Whole integer dial reading</span>
+            </div>
+
+            <div class="form-group">
+                <label for="gas">Gas Meter Register (m<sup>3</sup>):</label>
+                <input type="number" step="1" id="gas" name="gas" placeholder="e.g., 43000" required {% if not selected_month %}disabled{% endif %}>
+                <span class="helper-text">Whole integer volume reading</span>
+            </div>
+
+            <div class="form-group full-width">
+                <label for="water">Water Meter Register (m<sup>3</sup>):</label>
+                <input type="number" step="1" id="water" name="water" placeholder="e.g., 1500" required {% if not selected_month %}disabled{% endif %}>
+                <span class="helper-text">Whole integer volume reading</span>
+            </div>
+
+            <button type="submit" {% if not selected_month %}style="background-color: #ccc; cursor: not-allowed;" disabled{% endif %}>Save Meter Reading</button>
+        </form>
+
+        <!-- Data Display Table -->
+        <h2>Meter Logs & Calculated Consumption {% if selected_month %}(For {{ selected_month }}){% endif %}</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date</th>
+                    <th>Electricity <br><small>Register / Consumption (×10)</small></th>
+                    <th>Gas <br><small>Register / Consumption (Formula)</small></th>
+                    <th>Water <br><small>Register / Consumption (Net m<sup>3</sup>)</small></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for entry in entries %}
+                <tr>
+                    <td><strong>{{ entry.date }}</strong></td>
+                    <td>
+                        {{ "{:,d}".format(entry.electricity) }}
+                        <br>
+                        {% if entry.diff_elec is not none %}
+                            <span style="color: {% if entry.diff_elec < 0 %}red{% else %}green{% endif %}; font-size: 11px; font-weight: bold;">
+                                Usage: {{ "{:,d}".format(entry.diff_elec) }} kWh
+                            </span>
+                        {% else %}
+                            <span style="color: #999; font-size: 11px;">(Baseline Register)</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ "{:,d}".format(entry.gas) }}
+                        <br>
+                        {% if entry.diff_gas is not none %}
+                            <span style="color: {% if entry.diff_gas < 0 %}red{% else %}green{% endif %}; font-size: 11px; font-weight: bold;">
+                                Usage: {{ "{:,d}".format(entry.diff_gas) }} kWh
+                            </span>
+                        {% else %}
+                            <span style="color: #999; font-size: 11px;">(Baseline Register)</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {{ "{:,d}".format(entry.water) }}
+                        <br>
+                        {% if entry.diff_water is not none %}
+                            <span style="color: {% if entry.diff_water < 0 %}red{% else %}green{% endif %}; font-size: 11px; font-weight: bold;">
+                                Usage: {{ "{:,d}".format(entry.diff_water) }} m³
+                            </span>
+                        {% else %}
+                            <span style="color: #999; font-size: 11px;">(Baseline Register)</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4" class="no-data">No utility logs recorded for this period.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- JavaScript to automatically restrict the date picker to the selected month -->
+    <script>
+        document.addEventListener("DOMContentLoaded", function() {
+            const selectedMonth = "{{ selected_month }}";
+            const dateInput = document.getElementById("date");
+
+            if (selectedMonth && dateInput) {
+                const [year, month] = selectedMonth.split("-");
+                const firstDay = `${selectedMonth}-01`;
+                const lastDayDate = new Date(year, month, 0);
+                const lastDay = `${selectedMonth}-${String(lastDayDate.getDate()).padStart(2, '0')}`;
+
+                dateInput.setAttribute("min", firstDay);
+                dateInput.setAttribute("max", lastDay);
+            }
+        });
+    </script>
+
+</body>
+</html>
