@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Dashboard | Utility Tracker{% endblock %}
+
+{% block content %}
+<div class="card-header" style="margin-bottom: 2rem;">
+    <h1 style="font-size: 1.5rem;">Utility Performance Overview</h1>
+    <p class="card-subtitle">Active Billing Cycle: <strong>{{ summary.month }}</strong> ({{ summary.entry_count }} Days Logged)</p>
+</div>
+
+<!-- Key Performance Metric Cards -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+    
+    <!-- Electricity Card -->
+    <div class="card" style="border-top: 4px solid #eab308;">
+        <div class="card-subtitle">Electricity Incurred</div>
+        <div style="font-size: 2rem; font-weight: 700; margin: 0.5rem 0;">{{ "{:,d}".format(summary.total_elec) }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: normal;">kWh</span></div>
+        <div style="font-size: 0.8rem; color: var(--text-muted);">Scaled Factor: &times;10 Dial Multiplier</div>
+    </div>
+
+    <!-- Gas Card -->
+    <div class="card" style="border-top: 4px solid #f97316;">
+        <div class="card-subtitle">Thermal Gas Incurred</div>
+        <div style="font-size: 2rem; font-weight: 700; margin: 0.5rem 0;">{{ "{:,d}".format(summary.total_gas) }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: normal;">kWh</span></div>
+        <div style="font-size: 0.8rem; color: var(--text-muted);">Calorific Thermal Equivalent Applied</div>
+    </div>
+
+    <!-- Water Card -->
+    <div class="card" style="border-top: 4px solid #0284c7;">
+        <div class="card-subtitle">Water Volume Incurred</div>
+        <div style="font-size: 2rem; font-weight: 700; margin: 0.5rem 0;">{{ "{:,d}".format(summary.total_water) }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: normal;">m<sup>3</sup></span></div>
+        <div style="font-size: 0.8rem; color: var(--text-muted);">Net Direct Volumetric Differential</div>
+    </div>
+
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">Quick Actions</div>
+    </div>
+    <div style="display: flex; gap: 1rem;">
+        <a href="{{ url_for('entry.index') }}" class="btn btn-primary">Add New Register Log</a>
+        <a href="{{ url_for('reports.index', month=summary.month) }}" class="btn btn-outline">Inspect Full Month Breakdown</a>
+    </div>
+</div>
+{% endblock %}

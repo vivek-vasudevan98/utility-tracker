@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Data Entry & Ingestion | Utility Tracker{% endblock %}
+
+{% block content %}
+<!-- Active Month Selection Context -->
+<div class="card" style="background: #f1f5f9; border-left: 4px solid var(--primary);">
+    <form method="GET" action="{{ url_for('entry.index') }}" style="display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;">
+        <label for="month-filter" style="margin: 0;">Target Month & Year:</label>
+        <input type="month" id="month-filter" name="month" value="{{ selected_month }}" onchange="this.form.submit()">
+        {% if selected_month %}
+            <a href="{{ url_for('entry.index') }}" class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">Reset</a>
+        {% endif %}
+    </form>
+</div>
+
+<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem;">
+
+    <!-- Manual Register Reading Form -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">Manual Register Entry</div>
+            <div class="card-subtitle">Input cumulative readings direct from meter registers.</div>
+        </div>
+
+        <form action="{{ url_for('entry.add') }}" method="POST" class="form-grid">
+            <div class="form-group col-full">
+                <label for="date">Reading Date:</label>
+                <input type="date" id="date" name="date" required {% if not selected_month %}disabled{% endif %}>
+                {% if not selected_month %}
+                    <span class="input-hint" style="color: var(--danger);">* Select a Target Month above to unlock form.</span>
+                {% endif %}
+            </div>
+
+            <div class="form-group col-full">
+                <label for="electricity">Electricity Register (kWh Counter):</label>
+                <input type="number" step="1" id="electricity" name="electricity" placeholder="e.g. 758738" required {% if not selected_month %}disabled{% endif %}>
+                <span class="input-hint">Dial register display (Unscaled)</span>
+            </div>
+
+            <div class="form-group">
+                <label for="gas">Gas Register (m<sup>3</sup>):</label>
+                <input type="number" step="1" id="gas" name="gas" placeholder="e.g. 2828760" required {% if not selected_month %}disabled{% endif %}>
+                <span class="input-hint">Dial register display</span>
+            </div>
+
+            <div class="form-group">
+                <label for="water">Water Register (m<sup>3</sup>):</label>
+                <input type="number" step="1" id="water" name="water" placeholder="e.g. 30107" required {% if not selected_month %}disabled{% endif %}>
+                <span class="input-hint">Dial register display</span>
+            </div>
+
+            <div class="col-full" style="margin-top: 0.5rem;">
+                <button type="submit" class="btn btn-primary" style="width: 100%;" {% if not selected_month %}disabled style="opacity: 0.5; cursor: not-allowed;"{% endif %}>
+                    Commit Daily Register
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Bulk Excel Ingestion Sidebar -->
+    <div>
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Excel Ingestion</div>
+                <div class="card-subtitle">Bulk load consecutive daily dial logs.</div>
+            </div>
+
+            <form action="{{ url_for('entry.upload') }}" method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="selected_month" value="{{ selected_month }}">
+                
+                <div class="form-group" style="margin-bottom: 1.25rem;">
+                    <label for="excel_file">Select Spreadsheet (.xlsx, .xls):</label>
+                    <input type="file" id="excel_file" name="excel_file" accept=".xlsx, .xls" required {% if not selected_month %}disabled{% endif %}>
+                    <span class="input-hint">Expected columns: <code>date</code>, <code>electricity</code>, <code>gas</code>, <code>water</code></span>
+                </div>
+
+                <button type="submit" class="btn btn-secondary" style="width: 100%;" {% if not selected_month %}disabled style="opacity: 0.5; cursor: not-allowed;"{% endif %}>
+                    Execute Ingestion
+                </button>
+            </form>
+        </div>
+    </div>
+
+</div>
+
+<!-- Calendar Clamping Logic -->
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const selectedMonth = "{{ selected_month }}";
+        const dateInput = document.getElementById("date");
+
+        if (selectedMonth && dateInput) {
+            const [year, month] = selectedMonth.split("-");
+            const firstDay = `${selectedMonth}-01`;
+            const lastDayDate = new Date(year, month, 0);
+            const lastDay = `${selectedMonth}-${String(lastDayDate.getDate()).padStart(2, '0')}`;
+
+            dateInput.setAttribute("min", firstDay);
+            dateInput.setAttribute("max", lastDay);
+        }
+    });
+</script>
+{% endblock %}

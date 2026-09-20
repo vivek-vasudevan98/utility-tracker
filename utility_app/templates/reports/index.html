@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Historical Reports & Utility Trends | Utility Tracker{% endblock %}
+
+{% block content %}
+<!-- View Mode Toggle Bar -->
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem;">
+    <div style="display: flex; gap: 0.5rem;">
+        <a href="{{ url_for('reports.index', view='monthly', year=selected_year) }}" 
+           class="btn {% if view_type == 'monthly' %}btn-primary{% else %}btn-outline{% endif %}">
+           All-Time Monthly Trend (Bills)
+        </a>
+        <a href="{{ url_for('reports.index', view='daily', month=selected_month) }}" 
+           class="btn {% if view_type == 'daily' %}btn-primary{% else %}btn-outline{% endif %}">
+           Daily Register Breakdown
+        </a>
+    </div>
+
+    <!-- Filter Control Bars -->
+    {% if view_type == 'monthly' %}
+    <form method="GET" action="{{ url_for('reports.index') }}" style="display: flex; align-items: center; gap: 0.5rem;">
+        <input type="hidden" name="view" value="monthly">
+        <label for="year-select" style="margin: 0; font-size: 0.9rem;">Filter Year:</label>
+        <select id="year-select" name="year" onchange="this.form.submit()" style="padding: 0.5rem; border: 1px solid var(--border); border-radius: 4px;">
+            <option value="">All Historical Years (2005 - 2026)</option>
+            {% for yr in available_years %}
+                <option value="{{ yr }}" {% if selected_year == yr %}selected{% endif %}>{{ yr }}</option>
+            {% endfor %}
+        </select>
+        {% if selected_year %}
+            <a href="{{ url_for('reports.index', view='monthly') }}" class="btn btn-outline" style="padding: 0.4rem 0.8rem; font-size: 0.8rem;">Clear</a>
+        {% endif %}
+    </form>
+    {% else %}
+    <form method="GET" action="{{ url_for('reports.index') }}" style="display: flex; align-items: center; gap: 0.5rem;">
+        <input type="hidden" name="view" value="daily">
+        <label for="month-filter" style="margin: 0; font-size: 0.9rem;">Select Period:</label>
+        <input type="month" id="month-filter" name="month" value="{{ selected_month }}" onchange="this.form.submit()">
+    </form>
+    {% endif %}
+</div>
+
+{% if view_type == 'monthly' %}
+<!-- Monthly Macro Trend Table -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">Historical Billed Utility Consumption {% if selected_year %}({{ selected_year }}){% endif %}</div>
+        <div class="card-subtitle">Aggregated billed statement data. Daily sub-metering is disabled for these macro periods.</div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Billing Cycle</th>
+                <th>Electricity Total</th>
+                <th>Thermal Gas Total</th>
+                <th>Water Volume Total</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for b in monthly_bills %}
+            <tr>
+                <td>
+                    <strong>{{ b.month }}</strong>
+                    <br><small style="color: var(--text-muted);">{{ b.start_date }} &rarr; {{ b.end_date }}</small>
+                </td>
+                <td>
+                    <span style="font-weight: 700; font-size: 1rem;">{{ "{:,d}".format(b.electricity_kwh) }}</span>
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">kWh</span>
+                </td>
+                <td>
+                    <span style="font-weight: 700; font-size: 1rem;">{{ "{:,d}".format(b.gas_kwh) }}</span>
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">kWh</span>
+                </td>
+                <td>
+                    <span style="font-weight: 700; font-size: 1rem;">{{ "{:,d}".format(b.water_m3) }}</span>
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">m<sup>3</sup></span>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4" class="empty-state">No utility billing statements recorded for this selection.</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+
+{% else %}
+<!-- High-Resolution Daily Audit Log -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">Daily Register Breakdown {% if selected_month %}— {{ selected_month }}{% endif %}</div>
+        <div class="card-subtitle">Consecutive physical meter dial audits with integer ceiling rounding.</div>
+    </div>
+
+    {% if not has_daily_data and selected_month %}
+        <div class="alert alert-info" style="margin-top: 1rem;">
+            No daily physical meter readings exist for <strong>{{ selected_month }}</strong>. Daily breakdowns are only generated when sequential register inputs have been logged. Check the <strong>Monthly Trend</strong> view to inspect the final billed statement for this month.
+        </div>
+    {% endif %}
+
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Electricity <br><small>Register / Usage (×10)</small></th>
+                <th>Gas <br><small>Register / Thermal (Formula)</small></th>
+                <th>Water <br><small>Register / Net m<sup>3</sup></small></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for entry in daily_entries %}
+            <tr>
+                <td><strong>{{ entry.date }}</strong></td>
+                <td>
+                    {{ "{:,d}".format(entry.electricity) }}
+                    <br>
+                    {% if entry.diff_elec is not none %}
+                        <span class="text-usage">{{ "{:,d}".format(entry.diff_elec) }} kWh</span>
+                    {% else %}
+                        <span class="text-baseline">(Baseline Register)</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {{ "{:,d}".format(entry.gas) }}
+                    <br>
+                    {% if entry.diff_gas is not none %}
+                        <span class="text-usage">{{ "{:,d}".format(entry.diff_gas) }} kWh</span>
+                    {% else %}
+                        <span class="text-baseline">(Baseline Register)</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {{ "{:,d}".format(entry.water) }}
+                    <br>
+                    {% if entry.diff_water is not none %}
+                        <span class="text-usage">{{ "{:,d}".format(entry.diff_water) }} m<sup>3</sup></span>
+                    {% else %}
+                        <span class="text-baseline">(Baseline Register)</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="4" class="empty-state">
+                    {% if selected_month %}
+                        No daily register logs logged for period {{ selected_month }}.
+                    {% else %}
+                        Select a target billing cycle above to inspect high-resolution daily registers.
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}
