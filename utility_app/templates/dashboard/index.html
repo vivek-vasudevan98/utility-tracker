@@ -2,44 +2,173 @@
 {% block title %}Dashboard | Utility Tracker{% endblock %}
 
 {% block content %}
-<div class="card-header" style="margin-bottom: 2rem;">
-    <h1 style="font-size: 1.5rem;">Utility Performance Overview</h1>
-    <p class="card-subtitle">Active Billing Cycle: <strong>{{ summary.month }}</strong> ({{ summary.entry_count }} Days Logged)</p>
+<!-- Cycle Header and Filter -->
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+        <h1 style="font-size: 1.5rem; color: var(--text-main);">Utility Performance Overview</h1>
+        <p class="card-subtitle">
+            Cycle: <strong>{{ data.month }}</strong> &bull; 
+            Progress: <strong>{{ data.days_logged }} / {{ data.total_days }} Days Logged</strong>
+            {% if data.is_complete %}
+                <span style="color: var(--success); font-weight: 600;">(Cycle Complete & Rolled up to Bills)</span>
+            {% else %}
+                <span style="color: var(--accent); font-weight: 600;">(In Progress - Run-Rate Projection Active)</span>
+            {% endif %}
+        </p>
+    </div>
+
+    <form method="GET" action="{{ url_for('dashboard.index') }}" style="display: flex; align-items: center; gap: 0.5rem;">
+        <label for="month-select" style="margin: 0; font-size: 0.85rem;">Inspect Period:</label>
+        <input type="month" id="month-select" name="month" value="{{ selected_month }}" onchange="this.form.submit()">
+    </form>
 </div>
 
-<!-- Key Performance Metric Cards -->
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+<!-- Key Performance & Forecasting Cards -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
     
     <!-- Electricity Card -->
     <div class="card" style="border-top: 4px solid #eab308;">
-        <div class="card-subtitle">Electricity Incurred</div>
-        <div style="font-size: 2rem; font-weight: 700; margin: 0.5rem 0;">{{ "{:,d}".format(summary.total_elec) }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: normal;">kWh</span></div>
-        <div style="font-size: 0.8rem; color: var(--text-muted);">Scaled Factor: &times;10 Dial Multiplier</div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline;">
+            <span class="card-subtitle" style="font-weight: 700; color: #b45309; text-transform: uppercase;">Electricity</span>
+            <span style="font-size: 0.75rem; background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-weight: 600;">MTD Usage</span>
+        </div>
+        
+        <div style="font-size: 2.25rem; font-weight: 800; margin: 0.4rem 0;">
+            {{ "{:,d}".format(data.utilities.electricity.mtd) }} 
+            <span style="font-size: 1rem; color: var(--text-muted); font-weight: 500;">kWh</span>
+        </div>
+
+        <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-top: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border);">
+                <span style="font-size: 0.85rem; color: var(--text-muted);">Projected Month-End:</span>
+                <span style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
+                    {{ "{:,d}".format(data.utilities.electricity.predicted) }} kWh
+                </span>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; font-size: 0.825rem;">
+                <span style="color: var(--text-muted);">Vs. Prior Month ({{ data.prev_month_label }}):</span>
+                {% if data.utilities.electricity.mom %}
+                    <span style="font-weight: 700; color: {{ data.utilities.electricity.mom.color }};">
+                        {{ data.utilities.electricity.mom.arrow }} {{ data.utilities.electricity.mom.label }} kWh
+                    </span>
+                {% else %}
+                    <span style="color: var(--text-muted);">N/A</span>
+                {% endif %}
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.825rem;">
+                <span style="color: var(--text-muted);">Vs. Last Year ({{ data.prev_year_label }}):</span>
+                {% if data.utilities.electricity.yoy %}
+                    <span style="font-weight: 700; color: {{ data.utilities.electricity.yoy.color }};">
+                        {{ data.utilities.electricity.yoy.arrow }} {{ data.utilities.electricity.yoy.label }} kWh
+                    </span>
+                {% else %}
+                    <span style="color: var(--text-muted);">N/A</span>
+                {% endif %}
+            </div>
+        </div>
     </div>
 
-    <!-- Gas Card -->
+    <!-- Thermal Gas Card -->
     <div class="card" style="border-top: 4px solid #f97316;">
-        <div class="card-subtitle">Thermal Gas Incurred</div>
-        <div style="font-size: 2rem; font-weight: 700; margin: 0.5rem 0;">{{ "{:,d}".format(summary.total_gas) }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: normal;">kWh</span></div>
-        <div style="font-size: 0.8rem; color: var(--text-muted);">Calorific Thermal Equivalent Applied</div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline;">
+            <span class="card-subtitle" style="font-weight: 700; color: #c2410c; text-transform: uppercase;">Thermal Gas</span>
+            <span style="font-size: 0.75rem; background: #ffedd5; color: #9a3412; padding: 2px 6px; border-radius: 4px; font-weight: 600;">MTD Usage</span>
+        </div>
+        
+        <div style="font-size: 2.25rem; font-weight: 800; margin: 0.4rem 0;">
+            {{ "{:,d}".format(data.utilities.gas.mtd) }} 
+            <span style="font-size: 1rem; color: var(--text-muted); font-weight: 500;">kWh</span>
+        </div>
+
+        <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-top: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border);">
+                <span style="font-size: 0.85rem; color: var(--text-muted);">Projected Month-End:</span>
+                <span style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
+                    {{ "{:,d}".format(data.utilities.gas.predicted) }} kWh
+                </span>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; font-size: 0.825rem;">
+                <span style="color: var(--text-muted);">Vs. Prior Month ({{ data.prev_month_label }}):</span>
+                {% if data.utilities.gas.mom %}
+                    <span style="font-weight: 700; color: {{ data.utilities.gas.mom.color }};">
+                        {{ data.utilities.gas.mom.arrow }} {{ data.utilities.gas.mom.label }} kWh
+                    </span>
+                {% else %}
+                    <span style="color: var(--text-muted);">N/A</span>
+                {% endif %}
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.825rem;">
+                <span style="color: var(--text-muted);">Vs. Last Year ({{ data.prev_year_label }}):</span>
+                {% if data.utilities.gas.yoy %}
+                    <span style="font-weight: 700; color: {{ data.utilities.gas.yoy.color }};">
+                        {{ data.utilities.gas.yoy.arrow }} {{ data.utilities.gas.yoy.label }} kWh
+                    </span>
+                {% else %}
+                    <span style="color: var(--text-muted);">N/A</span>
+                {% endif %}
+            </div>
+        </div>
     </div>
 
-    <!-- Water Card -->
+    <!-- Water Volume Card -->
     <div class="card" style="border-top: 4px solid #0284c7;">
-        <div class="card-subtitle">Water Volume Incurred</div>
-        <div style="font-size: 2rem; font-weight: 700; margin: 0.5rem 0;">{{ "{:,d}".format(summary.total_water) }} <span style="font-size: 1rem; color: var(--text-muted); font-weight: normal;">m<sup>3</sup></span></div>
-        <div style="font-size: 0.8rem; color: var(--text-muted);">Net Direct Volumetric Differential</div>
+        <div style="display: flex; justify-content: space-between; align-items: baseline;">
+            <span class="card-subtitle" style="font-weight: 700; color: #0369a1; text-transform: uppercase;">Water Volume</span>
+            <span style="font-size: 0.75rem; background: #e0f2fe; color: #075985; padding: 2px 6px; border-radius: 4px; font-weight: 600;">MTD Usage</span>
+        </div>
+        
+        <div style="font-size: 2.25rem; font-weight: 800; margin: 0.4rem 0;">
+            {{ "{:,d}".format(data.utilities.water.mtd) }} 
+            <span style="font-size: 1rem; color: var(--text-muted); font-weight: 500;">m<sup>3</sup></span>
+        </div>
+
+        <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-top: 1rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border);">
+                <span style="font-size: 0.85rem; color: var(--text-muted);">Projected Month-End:</span>
+                <span style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
+                    {{ "{:,d}".format(data.utilities.water.predicted) }} m<sup>3</sup>
+                </span>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; font-size: 0.825rem;">
+                <span style="color: var(--text-muted);">Vs. Prior Month ({{ data.prev_month_label }}):</span>
+                {% if data.utilities.water.mom %}
+                    <span style="font-weight: 700; color: {{ data.utilities.water.mom.color }};">
+                        {{ data.utilities.water.mom.arrow }} {{ data.utilities.water.mom.label }} m<sup>3</sup>
+                    </span>
+                {% else %}
+                    <span style="color: var(--text-muted);">N/A</span>
+                {% endif %}
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.825rem;">
+                <span style="color: var(--text-muted);">Vs. Last Year ({{ data.prev_year_label }}):</span>
+                {% if data.utilities.water.yoy %}
+                    <span style="font-weight: 700; color: {{ data.utilities.water.yoy.color }};">
+                        {{ data.utilities.water.yoy.arrow }} {{ data.utilities.water.yoy.label }} m<sup>3</sup>
+                    </span>
+                {% else %}
+                    <span style="color: var(--text-muted);">N/A</span>
+                {% endif %}
+            </div>
+        </div>
     </div>
 
 </div>
 
+<!-- Quick Navigation Bar -->
 <div class="card">
     <div class="card-header">
         <div class="card-title">Quick Actions</div>
     </div>
-    <div style="display: flex; gap: 1rem;">
-        <a href="{{ url_for('entry.index') }}" class="btn btn-primary">Add New Register Log</a>
-        <a href="{{ url_for('reports.index', month=summary.month) }}" class="btn btn-outline">Inspect Full Month Breakdown</a>
+    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+        <a href="{{ url_for('entry.index', month=selected_month) }}" class="btn btn-primary">Log Daily Register</a>
+        <a href="{{ url_for('reports.index', view='daily', month=selected_month) }}" class="btn btn-outline">Inspect Daily Breakdown</a>
+        <a href="{{ url_for('reports.index', view='monthly') }}" class="btn btn-outline">View 20-Year Baseline Archive</a>
     </div>
 </div>
 {% endblock %}

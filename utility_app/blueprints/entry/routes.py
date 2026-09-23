@@ -2,6 +2,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash
 from utility_app import db
 from utility_app.models import UtilityEntry
 from utility_app.services.excel_handler import process_excel_upload
+from utility_app.services.analytics import sync_completed_month_bill
 
 entry_bp = Blueprint('entry', __name__)
 
@@ -33,7 +34,12 @@ def add():
             )
             db.session.add(new_entry)
             flash(f"Saved reading for {date}.", "success")
+            
         db.session.commit()
+        
+        # Trigger auto-rollup consolidation if month is complete
+        month_prefix = date[:7]
+        sync_completed_month_bill(month_prefix)
 
     month_prefix = date[:7] if date else ""
     return redirect(url_for('entry.index', month=month_prefix))
@@ -52,4 +58,9 @@ def upload():
 
     success, msg = process_excel_upload(file, target_month=selected_month)
     flash(msg, "success" if success else "danger")
+    
+    # Trigger auto-rollup consolidation if month is complete
+    if selected_month:
+        sync_completed_month_bill(selected_month)
+        
     return redirect(url_for('entry.index', month=selected_month))
