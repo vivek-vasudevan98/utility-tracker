@@ -60,30 +60,36 @@ def compute_variance(predicted: int, baseline: int | None) -> dict | None:
         return None
 
     diff = predicted - baseline
+    abs_formatted = f"{abs(diff):,d}"
+    
     if diff > 0:
         return {
             'diff': diff,
             'direction': 'up',
-            'arrow': '↑',
-            'color': 'var(--danger)',
-            'label': f"+{diff:,d}"
+            'arrow': '▲',
+            'color': '#ef4444',      # Red / Unfavorable
+            'bg': '#fee2e2',
+            'label': f"{abs_formatted}"
         }
     elif diff < 0:
         return {
             'diff': diff,
             'direction': 'down',
-            'arrow': '↓',
-            'color': 'var(--success)',
-            'label': f"-{abs(diff):,d}"
+            'arrow': '▼',
+            'color': '#16a34a',      # Green / Favorable
+            'bg': '#dcfce7',
+            'label': f"{abs_formatted}"
         }
     else:
         return {
             'diff': 0,
             'direction': 'neutral',
-            'arrow': '→',
-            'color': 'var(--text-muted)',
+            'arrow': '■',
+            'color': '#64748b',
+            'bg': '#f1f5f9',
             'label': "0"
         }
+    
 
 def get_dashboard_metrics(target_month: str) -> dict:
     """

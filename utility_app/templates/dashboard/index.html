@@ -2,157 +2,230 @@
 {% block title %}Dashboard | Utility Tracker{% endblock %}
 
 {% block content %}
-<!-- Cycle Header and Filter -->
-<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2rem; flex-wrap: wrap; gap: 1rem;">
-    <div>
-        <h1 style="font-size: 1.5rem; color: var(--text-main);">Utility Performance Overview</h1>
-        <p class="card-subtitle">
-            Cycle: <strong>{{ data.month }}</strong> &bull; 
-            Progress: <strong>{{ data.days_logged }} / {{ data.total_days }} Days Logged</strong>
-            {% if data.is_complete %}
-                <span style="color: var(--success); font-weight: 600;">(Cycle Complete & Rolled up to Bills)</span>
-            {% else %}
-                <span style="color: var(--accent); font-weight: 600;">(In Progress - Run-Rate Projection Active)</span>
-            {% endif %}
-        </p>
+<style>
+    .dashboard-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+    .period-badge {
+        font-size: 0.8rem;
+        background: #f1f5f9;
+        color: #475569;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-weight: 600;
+    }
+    .kpi-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        gap: 1.25rem;
+        margin-bottom: 1.5rem;
+    }
+    .kpi-card {
+        background: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 1.25rem 1.5rem;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.03);
+    }
+    .kpi-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 0.5rem;
+    }
+    .kpi-title {
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        color: #64748b;
+    }
+    .kpi-value-row {
+        display: flex;
+        align-items: baseline;
+        gap: 0.35rem;
+        margin-bottom: 1rem;
+    }
+    .kpi-number {
+        font-size: 2.25rem;
+        font-weight: 800;
+        color: #0f172a;
+        line-height: 1;
+        letter-spacing: -0.02em;
+    }
+    .kpi-unit {
+        font-size: 0.9rem;
+        font-weight: 500;
+        color: #64748b;
+    }
+    .telemetry-tray {
+        background: #f8fafc;
+        border: 1px solid #edf2f7;
+        border-radius: 6px;
+        padding: 0.75rem 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 0.45rem;
+    }
+    .telemetry-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 0.8rem;
+    }
+    .telemetry-label {
+        color: #64748b;
+        font-weight: 600;
+        font-size: 0.75rem;
+    }
+    .telemetry-val {
+        font-weight: 700;
+        color: #1e293b;
+    }
+    .var-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: 4px;
+        line-height: 1.2;
+    }
+</style>
+
+<!-- Clean Dashboard Header -->
+<div class="dashboard-header">
+    <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <h1 style="font-size: 1.25rem; font-weight: 700; margin: 0;">Performance Summary</h1>
+        <span class="period-badge">{{ data.month }} &bull; Day {{ data.days_logged }}/{{ data.total_days }}</span>
     </div>
 
-    <form method="GET" action="{{ url_for('dashboard.index') }}" style="display: flex; align-items: center; gap: 0.5rem;">
-        <label for="month-select" style="margin: 0; font-size: 0.85rem;">Inspect Period:</label>
-        <input type="month" id="month-select" name="month" value="{{ selected_month }}" onchange="this.form.submit()">
+    <!-- Period Selector Input -->
+    <form method="GET" action="{{ url_for('dashboard.index') }}" style="margin: 0;">
+        <input type="month" name="month" value="{{ selected_month }}" onchange="this.form.submit()" 
+               style="padding: 0.35rem 0.6rem; font-size: 0.85rem; border: 1px solid #cbd5e1; border-radius: 4px;">
     </form>
 </div>
 
-<!-- Key Performance & Forecasting Cards -->
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+<!-- Telemetry Cards -->
+<div class="kpi-grid">
     
     <!-- Electricity Card -->
-    <div class="card" style="border-top: 4px solid #eab308;">
-        <div style="display: flex; justify-content: space-between; align-items: baseline;">
-            <span class="card-subtitle" style="font-weight: 700; color: #b45309; text-transform: uppercase;">Electricity</span>
-            <span style="font-size: 0.75rem; background: #fef3c7; color: #92400e; padding: 2px 6px; border-radius: 4px; font-weight: 600;">MTD Usage</span>
+    <div class="kpi-card" style="border-top: 3px solid #eab308;">
+        <div class="kpi-top">
+            <span class="kpi-title">Electricity</span>
+            <span style="font-size: 0.68rem; font-weight: 700; color: #92400e; background: #fef3c7; padding: 2px 6px; border-radius: 3px;">MTD</span>
         </div>
-        
-        <div style="font-size: 2.25rem; font-weight: 800; margin: 0.4rem 0;">
-            {{ "{:,d}".format(data.utilities.electricity.mtd) }} 
-            <span style="font-size: 1rem; color: var(--text-muted); font-weight: 500;">kWh</span>
+        <div class="kpi-value-row">
+            <span class="kpi-number">{{ "{:,d}".format(data.utilities.electricity.mtd) }}</span>
+            <span class="kpi-unit">kWh</span>
         </div>
 
-        <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-top: 1rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border);">
-                <span style="font-size: 0.85rem; color: var(--text-muted);">Projected Month-End:</span>
-                <span style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
-                    {{ "{:,d}".format(data.utilities.electricity.predicted) }} kWh
-                </span>
+        <div class="telemetry-tray">
+            <div class="telemetry-row">
+                <span class="telemetry-label">EST. M-END</span>
+                <span class="telemetry-val">{{ "{:,d}".format(data.utilities.electricity.predicted) }} kWh</span>
             </div>
-
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; font-size: 0.825rem;">
-                <span style="color: var(--text-muted);">Vs. Prior Month ({{ data.prev_month_label }}):</span>
+            <div class="telemetry-row">
+                <span class="telemetry-label">MoM (vs {{ data.prev_month_label }})</span>
                 {% if data.utilities.electricity.mom %}
-                    <span style="font-weight: 700; color: {{ data.utilities.electricity.mom.color }};">
+                    <span class="var-pill" style="color: {{ data.utilities.electricity.mom.color }}; background: {{ data.utilities.electricity.mom.bg }};">
                         {{ data.utilities.electricity.mom.arrow }} {{ data.utilities.electricity.mom.label }} kWh
                     </span>
                 {% else %}
-                    <span style="color: var(--text-muted);">N/A</span>
+                    <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
                 {% endif %}
             </div>
-
-            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.825rem;">
-                <span style="color: var(--text-muted);">Vs. Last Year ({{ data.prev_year_label }}):</span>
+            <div class="telemetry-row">
+                <span class="telemetry-label">YoY (vs {{ data.prev_year_label }})</span>
                 {% if data.utilities.electricity.yoy %}
-                    <span style="font-weight: 700; color: {{ data.utilities.electricity.yoy.color }};">
+                    <span class="var-pill" style="color: {{ data.utilities.electricity.yoy.color }}; background: {{ data.utilities.electricity.yoy.bg }};">
                         {{ data.utilities.electricity.yoy.arrow }} {{ data.utilities.electricity.yoy.label }} kWh
                     </span>
                 {% else %}
-                    <span style="color: var(--text-muted);">N/A</span>
+                    <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
                 {% endif %}
             </div>
         </div>
     </div>
 
     <!-- Thermal Gas Card -->
-    <div class="card" style="border-top: 4px solid #f97316;">
-        <div style="display: flex; justify-content: space-between; align-items: baseline;">
-            <span class="card-subtitle" style="font-weight: 700; color: #c2410c; text-transform: uppercase;">Thermal Gas</span>
-            <span style="font-size: 0.75rem; background: #ffedd5; color: #9a3412; padding: 2px 6px; border-radius: 4px; font-weight: 600;">MTD Usage</span>
+    <div class="kpi-card" style="border-top: 3px solid #f97316;">
+        <div class="kpi-top">
+            <span class="kpi-title">Thermal Gas</span>
+            <span style="font-size: 0.68rem; font-weight: 700; color: #9a3412; background: #ffedd5; padding: 2px 6px; border-radius: 3px;">MTD</span>
         </div>
-        
-        <div style="font-size: 2.25rem; font-weight: 800; margin: 0.4rem 0;">
-            {{ "{:,d}".format(data.utilities.gas.mtd) }} 
-            <span style="font-size: 1rem; color: var(--text-muted); font-weight: 500;">kWh</span>
+        <div class="kpi-value-row">
+            <span class="kpi-number">{{ "{:,d}".format(data.utilities.gas.mtd) }}</span>
+            <span class="kpi-unit">kWh</span>
         </div>
 
-        <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-top: 1rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border);">
-                <span style="font-size: 0.85rem; color: var(--text-muted);">Projected Month-End:</span>
-                <span style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
-                    {{ "{:,d}".format(data.utilities.gas.predicted) }} kWh
-                </span>
+        <div class="telemetry-tray">
+            <div class="telemetry-row">
+                <span class="telemetry-label">EST. M-END</span>
+                <span class="telemetry-val">{{ "{:,d}".format(data.utilities.gas.predicted) }} kWh</span>
             </div>
-
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; font-size: 0.825rem;">
-                <span style="color: var(--text-muted);">Vs. Prior Month ({{ data.prev_month_label }}):</span>
+            <div class="telemetry-row">
+                <span class="telemetry-label">MoM (vs {{ data.prev_month_label }})</span>
                 {% if data.utilities.gas.mom %}
-                    <span style="font-weight: 700; color: {{ data.utilities.gas.mom.color }};">
+                    <span class="var-pill" style="color: {{ data.utilities.gas.mom.color }}; background: {{ data.utilities.gas.mom.bg }};">
                         {{ data.utilities.gas.mom.arrow }} {{ data.utilities.gas.mom.label }} kWh
                     </span>
                 {% else %}
-                    <span style="color: var(--text-muted);">N/A</span>
+                    <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
                 {% endif %}
             </div>
-
-            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.825rem;">
-                <span style="color: var(--text-muted);">Vs. Last Year ({{ data.prev_year_label }}):</span>
+            <div class="telemetry-row">
+                <span class="telemetry-label">YoY (vs {{ data.prev_year_label }})</span>
                 {% if data.utilities.gas.yoy %}
-                    <span style="font-weight: 700; color: {{ data.utilities.gas.yoy.color }};">
+                    <span class="var-pill" style="color: {{ data.utilities.gas.yoy.color }}; background: {{ data.utilities.gas.yoy.bg }};">
                         {{ data.utilities.gas.yoy.arrow }} {{ data.utilities.gas.yoy.label }} kWh
                     </span>
                 {% else %}
-                    <span style="color: var(--text-muted);">N/A</span>
+                    <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
                 {% endif %}
             </div>
         </div>
     </div>
 
-    <!-- Water Volume Card -->
-    <div class="card" style="border-top: 4px solid #0284c7;">
-        <div style="display: flex; justify-content: space-between; align-items: baseline;">
-            <span class="card-subtitle" style="font-weight: 700; color: #0369a1; text-transform: uppercase;">Water Volume</span>
-            <span style="font-size: 0.75rem; background: #e0f2fe; color: #075985; padding: 2px 6px; border-radius: 4px; font-weight: 600;">MTD Usage</span>
+    <!-- Water Card -->
+    <div class="kpi-card" style="border-top: 3px solid #0284c7;">
+        <div class="kpi-top">
+            <span class="kpi-title">Water Volume</span>
+            <span style="font-size: 0.68rem; font-weight: 700; color: #075985; background: #e0f2fe; padding: 2px 6px; border-radius: 3px;">MTD</span>
         </div>
-        
-        <div style="font-size: 2.25rem; font-weight: 800; margin: 0.4rem 0;">
-            {{ "{:,d}".format(data.utilities.water.mtd) }} 
-            <span style="font-size: 1rem; color: var(--text-muted); font-weight: 500;">m<sup>3</sup></span>
+        <div class="kpi-value-row">
+            <span class="kpi-number">{{ "{:,d}".format(data.utilities.water.mtd) }}</span>
+            <span class="kpi-unit">m<sup>3</sup></span>
         </div>
 
-        <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: 6px; padding: 1rem; margin-top: 1rem;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; padding-bottom: 0.5rem; border-bottom: 1px dashed var(--border);">
-                <span style="font-size: 0.85rem; color: var(--text-muted);">Projected Month-End:</span>
-                <span style="font-size: 1.05rem; font-weight: 700; color: var(--text-main);">
-                    {{ "{:,d}".format(data.utilities.water.predicted) }} m<sup>3</sup>
-                </span>
+        <div class="telemetry-tray">
+            <div class="telemetry-row">
+                <span class="telemetry-label">EST. M-END</span>
+                <span class="telemetry-val">{{ "{:,d}".format(data.utilities.water.predicted) }} m<sup>3</sup></span>
             </div>
-
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; font-size: 0.825rem;">
-                <span style="color: var(--text-muted);">Vs. Prior Month ({{ data.prev_month_label }}):</span>
+            <div class="telemetry-row">
+                <span class="telemetry-label">MoM (vs {{ data.prev_month_label }})</span>
                 {% if data.utilities.water.mom %}
-                    <span style="font-weight: 700; color: {{ data.utilities.water.mom.color }};">
+                    <span class="var-pill" style="color: {{ data.utilities.water.mom.color }}; background: {{ data.utilities.water.mom.bg }};">
                         {{ data.utilities.water.mom.arrow }} {{ data.utilities.water.mom.label }} m<sup>3</sup>
                     </span>
                 {% else %}
-                    <span style="color: var(--text-muted);">N/A</span>
+                    <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
                 {% endif %}
             </div>
-
-            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 0.825rem;">
-                <span style="color: var(--text-muted);">Vs. Last Year ({{ data.prev_year_label }}):</span>
+            <div class="telemetry-row">
+                <span class="telemetry-label">YoY (vs {{ data.prev_year_label }})</span>
                 {% if data.utilities.water.yoy %}
-                    <span style="font-weight: 700; color: {{ data.utilities.water.yoy.color }};">
+                    <span class="var-pill" style="color: {{ data.utilities.water.yoy.color }}; background: {{ data.utilities.water.yoy.bg }};">
                         {{ data.utilities.water.yoy.arrow }} {{ data.utilities.water.yoy.label }} m<sup>3</sup>
                     </span>
                 {% else %}
-                    <span style="color: var(--text-muted);">N/A</span>
+                    <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
                 {% endif %}
             </div>
         </div>
@@ -160,15 +233,10 @@
 
 </div>
 
-<!-- Quick Navigation Bar -->
-<div class="card">
-    <div class="card-header">
-        <div class="card-title">Quick Actions</div>
-    </div>
-    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-        <a href="{{ url_for('entry.index', month=selected_month) }}" class="btn btn-primary">Log Daily Register</a>
-        <a href="{{ url_for('reports.index', view='daily', month=selected_month) }}" class="btn btn-outline">Inspect Daily Breakdown</a>
-        <a href="{{ url_for('reports.index', view='monthly') }}" class="btn btn-outline">View 20-Year Baseline Archive</a>
-    </div>
+<!-- Compact Navigation Bar -->
+<div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+    <a href="{{ url_for('entry.index', month=selected_month) }}" class="btn btn-primary" style="font-size: 0.85rem; padding: 0.5rem 1rem;">Log Register</a>
+    <a href="{{ url_for('reports.index', view='daily', month=selected_month) }}" class="btn btn-outline" style="font-size: 0.85rem; padding: 0.5rem 1rem;">Daily Log</a>
+    <a href="{{ url_for('reports.index', view='monthly') }}" class="btn btn-outline" style="font-size: 0.85rem; padding: 0.5rem 1rem;">Historical Archive</a>
 </div>
 {% endblock %}
