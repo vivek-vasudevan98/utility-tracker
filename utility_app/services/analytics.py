@@ -152,3 +152,106 @@ def get_dashboard_metrics(target_month: str) -> dict:
             }
         }
     }
+
+def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
+    """
+    Builds aligned daily time-series data (Days 1 to 31) for:
+      - Current target month
+      - Prior month (MoM)
+      - Prior year same month (YoY)
+    Maps utility keys to column names and handles baseline logic.
+    """
+    attr_map = {
+        'electricity': ('diff_elec', 'electricity_kwh', 'kWh', '#eab308'),
+        'gas': ('diff_gas', 'gas_kwh', 'kWh', '#f97316'),
+        'water': ('diff_water', 'water_m3', 'm³', '#0284c7')
+    }
+    
+    if utility not in attr_map:
+        utility = 'electricity'
+        
+    diff_key, bill_col, unit, color = attr_map[utility]
+    year, month = map(int, target_month.split('-'))
+    total_days = get_days_in_month(year, month)
+    
+    # 1. Target Month Daily Series
+    cur_records = get_month_records_with_baseline(target_month)
+    cur_map = {int(r['date'].split('-')[2]): r[diff_key] for r in cur_records if r[diff_key] is not None}
+    
+    # 2. Prior Month Keys
+    prev_m_str = f"{year - 1}-12" if month == 1 else f"{year}-{str(month - 1).zfill(2)}"
+    prev_m_records = get_month_records_with_baseline(prev_m_str)
+    prev_m_map = {int(r['date'].split('-')[2]): r[diff_key] for r in prev_m_records if r[diff_key] is not None}
+    
+    # 3. Prior Year Keys
+    prev_y_str = f"{year - 1}-{str(month).zfill(2)}"
+    prev_y_records = get_month_records_with_baseline(prev_y_str)
+    prev_y_map = {int(r['date'].split('-')[2]): r[diff_key] for r in prev_y_records if r[diff_key] is not None}
+    
+    # Check for macro statement fallback if daily data is absent
+    prev_m_bill = MonthlyUtilityBill.query.filter_by(month=prev_m_str).first()
+    prev_y_bill = MonthlyUtilityBill.query.filter_by(month=prev_y_str).first()
+    
+    prev_m_fallback = None
+    if not prev_m_map and prev_m_bill:
+        pm_y, pm_m = map(int, prev_m_str.split('-'))
+        prev_m_fallback = math.ceil(getattr(prev_m_bill, bill_col) / get_days_in_month(pm_y, pm_m))
+
+    prev_y_fallback = None
+    if not prev_y_map and prev_y_bill:
+        py_y, py_m = map(int, prev_y_str.split('-'))
+        prev_y_fallback = math.ceil(getattr(prev_y_bill, bill_col) / get_days_in_month(py_y, py_m))
+
+    # Assemble aligned 1..total_days series
+    labels = []
+    current_series = []
+    mom_series = []
+    yoy_series = []
+    
+    for day in range(1, total_days + 1):
+        labels.append(f"Day {day}")
+        current_series.append(cur_map.get(day, None))
+        
+        # MoM series
+        if prev_m_map:
+            mom_series.append(prev_m_map.get(day, None))
+        else:
+            mom_series.append(prev_m_fallback)
+            
+        # YoY series
+        if prev_y_map:
+            yoy_series.append(prev_y_map.get(day, None))
+        else:
+            yoy_series.append(prev_y_fallback)
+
+    # Compute high-level telemetry stats for current period
+    valid_cur = [v for v in current_series if v is not None]
+    mtd_total = sum(valid_cur)
+    daily_avg = math.ceil(mtd_total / len(valid_cur)) if valid_cur else 0
+    peak_val = max(valid_cur) if valid_cur else 0
+    peak_day = labels[current_series.index(peak_val)] if valid_cur else "—"
+
+    return {
+        'utility': utility,
+        'unit': unit,
+        'color': color,
+        'target_month': target_month,
+        'prev_month_label': prev_m_str,
+        'prev_year_label': prev_y_str,
+        'has_mom_daily': bool(prev_m_map),
+        'has_yoy_daily': bool(prev_y_map),
+        'stats': {
+            'mtd_total': mtd_total,
+            'daily_avg': daily_avg,
+            'peak_val': peak_val,
+            'peak_day': peak_day,
+            'days_logged': len(valid_cur),
+            'total_days': total_days
+        },
+        'chart_data': {
+            'labels': labels,
+            'current': current_series,
+            'mom': mom_series,
+            'yoy': yoy_series
+        }
+    }

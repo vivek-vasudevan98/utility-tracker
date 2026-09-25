@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{% block title %}{{ data.utility|capitalize }} Telemetry Analytics | Utility Tracker{% endblock %}
+
+{% block content %}
+<!-- Include Chart.js via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+<style>
+    .analytics-nav {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1.5rem;
+    }
+    .stats-strip {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+    }
+    .stat-pill {
+        background: #ffffff;
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 0.85rem 1.25rem;
+    }
+    .stat-pill-label {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        margin-bottom: 0.25rem;
+    }
+    .stat-pill-val {
+        font-size: 1.35rem;
+        font-weight: 800;
+        color: var(--text-main);
+        letter-spacing: -0.02em;
+    }
+    .chart-container-card {
+        background: #ffffff;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.5rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+    .chart-toolbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+    }
+    .toggle-group {
+        display: inline-flex;
+        background: #f1f5f9;
+        border-radius: 5px;
+        padding: 2px;
+    }
+    .toggle-btn {
+        background: transparent;
+        border: none;
+        padding: 0.35rem 0.85rem;
+        font-size: 0.75rem;
+        font-weight: 700;
+        color: #64748b;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: all 0.15s ease;
+    }
+    .toggle-btn.active {
+        background: #ffffff;
+        color: #0f172a;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+    }
+</style>
+
+<!-- Top Back & Title Bar -->
+<div class="analytics-nav">
+    <div style="display: flex; align-items: center; gap: 0.75rem;">
+        <a href="{{ url_for('dashboard.index', month=selected_month) }}" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">&larr; Dashboard</a>
+        <h1 style="font-size: 1.25rem; font-weight: 700; margin: 0; text-transform: uppercase; letter-spacing: 0.05em;">
+            {{ data.utility }} Telemetry
+        </h1>
+        <span style="font-size: 0.8rem; background: #f1f5f9; color: #475569; padding: 3px 8px; border-radius: 4px; font-weight: 600;">
+            {{ data.target_month }}
+        </span>
+    </div>
+
+    <!-- Cycle Selector -->
+    <form method="GET" action="{{ url_for('dashboard.analytics', utility=data.utility) }}" style="margin: 0;">
+        <input type="month" name="month" value="{{ selected_month }}" onchange="this.form.submit()" 
+               style="padding: 0.35rem 0.6rem; font-size: 0.85rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+    </form>
+</div>
+
+<!-- Telemetry Summary Metric Strip -->
+<div class="stats-strip">
+    <div class="stat-pill" style="border-left: 3px solid {{ data.color }};">
+        <div class="stat-pill-label">MTD Consumption</div>
+        <div class="stat-pill-val">{{ "{:,d}".format(data.stats.mtd_total) }} <span style="font-size: 0.85rem; font-weight: 500; color: var(--text-muted);">{{ data.unit }}</span></div>
+    </div>
+    <div class="stat-pill">
+        <div class="stat-pill-label">Daily Burn Rate</div>
+        <div class="stat-pill-val">{{ "{:,d}".format(data.stats.daily_avg) }} <span style="font-size: 0.85rem; font-weight: 500; color: var(--text-muted);">{{ data.unit }}/day</span></div>
+    </div>
+    <div class="stat-pill">
+        <div class="stat-pill-label">Peak Demand Day</div>
+        <div class="stat-pill-val">{{ "{:,d}".format(data.stats.peak_val) }} <span style="font-size: 0.85rem; font-weight: 500; color: var(--text-muted);">{{ data.unit }}</span></div>
+        <div style="font-size: 0.7rem; color: var(--text-muted);">Logged on {{ data.stats.peak_day }}</div>
+    </div>
+    <div class="stat-pill">
+        <div class="stat-pill-label">Register Resolution</div>
+        <div class="stat-pill-val">{{ data.stats.days_logged }} / {{ data.stats.total_days }} <span style="font-size: 0.85rem; font-weight: 500; color: var(--text-muted);">Days</span></div>
+    </div>
+</div>
+
+<!-- Interactive Chart Card -->
+<div class="chart-container-card">
+    <div class="chart-toolbar">
+        <div>
+            <span style="font-size: 0.85rem; font-weight: 700; color: var(--text-main);">Daily Delta Trajectory</span>
+            <span id="benchmark-caption" style="font-size: 0.75rem; color: var(--text-muted); margin-left: 0.5rem;">
+                Comparing vs {{ data.prev_month_label }} (MoM)
+            </span>
+        </div>
+
+        <!-- Mode Toggle Switch -->
+        <div class="toggle-group">
+            <button type="button" class="toggle-btn active" id="btn-mom" onclick="switchBenchmark('mom')">vs MoM ({{ data.prev_month_label }})</button>
+            <button type="button" class="toggle-btn" id="btn-yoy" onclick="switchBenchmark('yoy')">vs YoY ({{ data.prev_year_label }})</button>
+        </div>
+    </div>
+
+    <!-- Chart Canvas -->
+    <div style="position: relative; height: 380px; width: 100%;">
+        <canvas id="telemetryChart"></canvas>
+    </div>
+</div>
+
+<!-- Chart.js Configuration -->
+<script>
+    const chartLabels = {{ data.chart_data.labels | tojson }};
+    const currentSeries = {{ data.chart_data.current | tojson }};
+    const momSeries = {{ data.chart_data.mom | tojson }};
+    const yoySeries = {{ data.chart_data.yoy | tojson }};
+    
+    const primaryColor = "{{ data.color }}";
+    const unit = "{{ data.unit }}";
+
+    const ctx = document.getElementById('telemetryChart').getContext('2d');
+    
+    const chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: chartLabels,
+            datasets: [
+                {
+                    label: "{{ data.target_month }} (Current)",
+                    data: currentSeries,
+                    borderColor: primaryColor,
+                    backgroundColor: primaryColor + '15',
+                    borderWidth: 2.5,
+                    fill: true,
+                    tension: 0.25,
+                    pointRadius: 3,
+                    pointHoverRadius: 6,
+                    pointBackgroundColor: primaryColor
+                },
+                {
+                    label: "Benchmark: {{ data.prev_month_label }}",
+                    data: momSeries,
+                    borderColor: '#94a3b8',
+                    borderWidth: 1.75,
+                    borderDash: [5, 4],
+                    fill: false,
+                    tension: 0.25,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    pointBackgroundColor: '#94a3b8'
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                mode: 'index',
+                intersect: false,
+            },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    align: 'end',
+                    labels: {
+                        boxWidth: 12,
+                        font: { size: 11, weight: '600' },
+                        color: '#64748b'
+                    }
+                },
+                tooltip: {
+                    backgroundColor: '#0f172a',
+                    titleFont: { size: 12, weight: '700' },
+                    bodyFont: { size: 12 },
+                    padding: 10,
+                    callbacks: {
+                        label: function(context) {
+                            let val = context.parsed.y;
+                            if (val === null || val === undefined) return context.dataset.label + ': No Data';
+                            return context.dataset.label + ': ' + val.toLocaleString() + ' ' + unit;
+                        }
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { color: '#94a3b8', font: { size: 10 } }
+                },
+                y: {
+                    border: { dash: [4, 4] },
+                    grid: { color: '#f1f5f9' },
+                    ticks: {
+                        color: '#94a3b8',
+                        font: { size: 10 },
+                        callback: function(val) {
+                            return val.toLocaleString();
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    function switchBenchmark(mode) {
+        const btnMom = document.getElementById('btn-mom');
+        const btnYoy = document.getElementById('btn-yoy');
+        const caption = document.getElementById('benchmark-caption');
+
+        if (mode === 'mom') {
+            btnMom.classList.add('active');
+            btnYoy.classList.remove('active');
+            caption.innerText = "Comparing vs {{ data.prev_month_label }} (MoM)";
+            
+            chart.data.datasets[1].label = "Benchmark: {{ data.prev_month_label }}";
+            chart.data.datasets[1].data = momSeries;
+        } else {
+            btnYoy.classList.add('active');
+            btnMom.classList.remove('active');
+            caption.innerText = "Comparing vs {{ data.prev_year_label }} (YoY)";
+            
+            chart.data.datasets[1].label = "Benchmark: {{ data.prev_year_label }}";
+            chart.data.datasets[1].data = yoySeries;
+        }
+        chart.update();
+    }
+</script>
+{% endblock %}

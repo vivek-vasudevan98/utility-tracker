@@ -61,6 +61,17 @@
         font-weight: 500;
         color: #64748b;
     }
+    .kpi-card-link {
+        text-decoration: none;
+        color: inherit;
+        display: block;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .kpi-card-link:hover .kpi-card {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+        border-color: #cbd5e1;
+    }
     .telemetry-tray {
         background: #f8fafc;
         border: 1px solid #edf2f7;
@@ -115,121 +126,127 @@
 <div class="kpi-grid">
     
     <!-- Electricity Card -->
-    <div class="kpi-card" style="border-top: 3px solid #eab308;">
-        <div class="kpi-top">
-            <span class="kpi-title">Electricity</span>
-            <span style="font-size: 0.68rem; font-weight: 700; color: #92400e; background: #fef3c7; padding: 2px 6px; border-radius: 3px;">MTD</span>
-        </div>
-        <div class="kpi-value-row">
-            <span class="kpi-number">{{ "{:,d}".format(data.utilities.electricity.mtd) }}</span>
-            <span class="kpi-unit">kWh</span>
-        </div>
+    <a href="{{ url_for('dashboard.analytics', utility='electricity', month=selected_month) }}" class="kpi-card-link">
+        <div class="kpi-card" style="border-top: 3px solid #eab308;">
+            <div class="kpi-top">
+                <span class="kpi-title">Electricity</span>
+                <span style="font-size: 0.68rem; font-weight: 700; color: #92400e; background: #fef3c7; padding: 2px 6px; border-radius: 3px;">MTD</span>
+            </div>
+            <div class="kpi-value-row">
+                <span class="kpi-number">{{ "{:,d}".format(data.utilities.electricity.mtd) }}</span>
+                <span class="kpi-unit">kWh</span>
+            </div>
 
-        <div class="telemetry-tray">
-            <div class="telemetry-row">
-                <span class="telemetry-label">EST. M-END</span>
-                <span class="telemetry-val">{{ "{:,d}".format(data.utilities.electricity.predicted) }} kWh</span>
-            </div>
-            <div class="telemetry-row">
-                <span class="telemetry-label">MoM (vs {{ data.prev_month_label }})</span>
-                {% if data.utilities.electricity.mom %}
-                    <span class="var-pill" style="color: {{ data.utilities.electricity.mom.color }}; background: {{ data.utilities.electricity.mom.bg }};">
-                        {{ data.utilities.electricity.mom.arrow }} {{ data.utilities.electricity.mom.label }} kWh
-                    </span>
-                {% else %}
-                    <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
-                {% endif %}
-            </div>
-            <div class="telemetry-row">
-                <span class="telemetry-label">YoY (vs {{ data.prev_year_label }})</span>
-                {% if data.utilities.electricity.yoy %}
-                    <span class="var-pill" style="color: {{ data.utilities.electricity.yoy.color }}; background: {{ data.utilities.electricity.yoy.bg }};">
-                        {{ data.utilities.electricity.yoy.arrow }} {{ data.utilities.electricity.yoy.label }} kWh
-                    </span>
-                {% else %}
-                    <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
-                {% endif %}
+            <div class="telemetry-tray">
+                <div class="telemetry-row">
+                    <span class="telemetry-label">EST. M-END</span>
+                    <span class="telemetry-val">{{ "{:,d}".format(data.utilities.electricity.predicted) }} kWh</span>
+                </div>
+                <div class="telemetry-row">
+                    <span class="telemetry-label">MoM (vs {{ data.prev_month_label }})</span>
+                    {% if data.utilities.electricity.mom %}
+                        <span class="var-pill" style="color: {{ data.utilities.electricity.mom.color }}; background: {{ data.utilities.electricity.mom.bg }};">
+                            {{ data.utilities.electricity.mom.arrow }} {{ data.utilities.electricity.mom.label }} kWh
+                        </span>
+                    {% else %}
+                        <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
+                    {% endif %}
+                </div>
+                <div class="telemetry-row">
+                    <span class="telemetry-label">YoY (vs {{ data.prev_year_label }})</span>
+                    {% if data.utilities.electricity.yoy %}
+                        <span class="var-pill" style="color: {{ data.utilities.electricity.yoy.color }}; background: {{ data.utilities.electricity.yoy.bg }};">
+                            {{ data.utilities.electricity.yoy.arrow }} {{ data.utilities.electricity.yoy.label }} kWh
+                        </span>
+                    {% else %}
+                        <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
+                    {% endif %}
+                </div>
             </div>
         </div>
-    </div>
+    </a>
 
     <!-- Thermal Gas Card -->
-    <div class="kpi-card" style="border-top: 3px solid #f97316;">
-        <div class="kpi-top">
-            <span class="kpi-title">Thermal Gas</span>
-            <span style="font-size: 0.68rem; font-weight: 700; color: #9a3412; background: #ffedd5; padding: 2px 6px; border-radius: 3px;">MTD</span>
-        </div>
-        <div class="kpi-value-row">
-            <span class="kpi-number">{{ "{:,d}".format(data.utilities.gas.mtd) }}</span>
-            <span class="kpi-unit">kWh</span>
-        </div>
+    <a href="{{ url_for('dashboard.analytics', utility='gas', month=selected_month) }}" class="kpi-card-link">
+        <div class="kpi-card" style="border-top: 3px solid #f97316;">
+            <div class="kpi-top">
+                <span class="kpi-title">Thermal Gas</span>
+                <span style="font-size: 0.68rem; font-weight: 700; color: #9a3412; background: #ffedd5; padding: 2px 6px; border-radius: 3px;">MTD</span>
+            </div>
+            <div class="kpi-value-row">
+                <span class="kpi-number">{{ "{:,d}".format(data.utilities.gas.mtd) }}</span>
+                <span class="kpi-unit">kWh</span>
+            </div>
 
-        <div class="telemetry-tray">
-            <div class="telemetry-row">
-                <span class="telemetry-label">EST. M-END</span>
-                <span class="telemetry-val">{{ "{:,d}".format(data.utilities.gas.predicted) }} kWh</span>
-            </div>
-            <div class="telemetry-row">
-                <span class="telemetry-label">MoM (vs {{ data.prev_month_label }})</span>
-                {% if data.utilities.gas.mom %}
-                    <span class="var-pill" style="color: {{ data.utilities.gas.mom.color }}; background: {{ data.utilities.gas.mom.bg }};">
-                        {{ data.utilities.gas.mom.arrow }} {{ data.utilities.gas.mom.label }} kWh
-                    </span>
-                {% else %}
-                    <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
-                {% endif %}
-            </div>
-            <div class="telemetry-row">
-                <span class="telemetry-label">YoY (vs {{ data.prev_year_label }})</span>
-                {% if data.utilities.gas.yoy %}
-                    <span class="var-pill" style="color: {{ data.utilities.gas.yoy.color }}; background: {{ data.utilities.gas.yoy.bg }};">
-                        {{ data.utilities.gas.yoy.arrow }} {{ data.utilities.gas.yoy.label }} kWh
-                    </span>
-                {% else %}
-                    <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
-                {% endif %}
+            <div class="telemetry-tray">
+                <div class="telemetry-row">
+                    <span class="telemetry-label">EST. M-END</span>
+                    <span class="telemetry-val">{{ "{:,d}".format(data.utilities.gas.predicted) }} kWh</span>
+                </div>
+                <div class="telemetry-row">
+                    <span class="telemetry-label">MoM (vs {{ data.prev_month_label }})</span>
+                    {% if data.utilities.gas.mom %}
+                        <span class="var-pill" style="color: {{ data.utilities.gas.mom.color }}; background: {{ data.utilities.gas.mom.bg }};">
+                            {{ data.utilities.gas.mom.arrow }} {{ data.utilities.gas.mom.label }} kWh
+                        </span>
+                    {% else %}
+                        <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
+                    {% endif %}
+                </div>
+                <div class="telemetry-row">
+                    <span class="telemetry-label">YoY (vs {{ data.prev_year_label }})</span>
+                    {% if data.utilities.gas.yoy %}
+                        <span class="var-pill" style="color: {{ data.utilities.gas.yoy.color }}; background: {{ data.utilities.gas.yoy.bg }};">
+                            {{ data.utilities.gas.yoy.arrow }} {{ data.utilities.gas.yoy.label }} kWh
+                        </span>
+                    {% else %}
+                        <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
+                    {% endif %}
+                </div>
             </div>
         </div>
-    </div>
+    </a>
 
     <!-- Water Card -->
-    <div class="kpi-card" style="border-top: 3px solid #0284c7;">
-        <div class="kpi-top">
-            <span class="kpi-title">Water Volume</span>
-            <span style="font-size: 0.68rem; font-weight: 700; color: #075985; background: #e0f2fe; padding: 2px 6px; border-radius: 3px;">MTD</span>
-        </div>
-        <div class="kpi-value-row">
-            <span class="kpi-number">{{ "{:,d}".format(data.utilities.water.mtd) }}</span>
-            <span class="kpi-unit">m<sup>3</sup></span>
-        </div>
+     <a href="{{ url_for('dashboard.analytics', utility='water', month=selected_month) }}" class="kpi-card-link">   
+        <div class="kpi-card" style="border-top: 3px solid #0284c7;">
+            <div class="kpi-top">
+                <span class="kpi-title">Water Volume</span>
+                <span style="font-size: 0.68rem; font-weight: 700; color: #075985; background: #e0f2fe; padding: 2px 6px; border-radius: 3px;">MTD</span>
+            </div>
+            <div class="kpi-value-row">
+                <span class="kpi-number">{{ "{:,d}".format(data.utilities.water.mtd) }}</span>
+                <span class="kpi-unit">m<sup>3</sup></span>
+            </div>
 
-        <div class="telemetry-tray">
-            <div class="telemetry-row">
-                <span class="telemetry-label">EST. M-END</span>
-                <span class="telemetry-val">{{ "{:,d}".format(data.utilities.water.predicted) }} m<sup>3</sup></span>
-            </div>
-            <div class="telemetry-row">
-                <span class="telemetry-label">MoM (vs {{ data.prev_month_label }})</span>
-                {% if data.utilities.water.mom %}
-                    <span class="var-pill" style="color: {{ data.utilities.water.mom.color }}; background: {{ data.utilities.water.mom.bg }};">
-                        {{ data.utilities.water.mom.arrow }} {{ data.utilities.water.mom.label }} m<sup>3</sup>
-                    </span>
-                {% else %}
-                    <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
-                {% endif %}
-            </div>
-            <div class="telemetry-row">
-                <span class="telemetry-label">YoY (vs {{ data.prev_year_label }})</span>
-                {% if data.utilities.water.yoy %}
-                    <span class="var-pill" style="color: {{ data.utilities.water.yoy.color }}; background: {{ data.utilities.water.yoy.bg }};">
-                        {{ data.utilities.water.yoy.arrow }} {{ data.utilities.water.yoy.label }} m<sup>3</sup>
-                    </span>
-                {% else %}
-                    <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
-                {% endif %}
+            <div class="telemetry-tray">
+                <div class="telemetry-row">
+                    <span class="telemetry-label">EST. M-END</span>
+                    <span class="telemetry-val">{{ "{:,d}".format(data.utilities.water.predicted) }} m<sup>3</sup></span>
+                </div>
+                <div class="telemetry-row">
+                    <span class="telemetry-label">MoM (vs {{ data.prev_month_label }})</span>
+                    {% if data.utilities.water.mom %}
+                        <span class="var-pill" style="color: {{ data.utilities.water.mom.color }}; background: {{ data.utilities.water.mom.bg }};">
+                            {{ data.utilities.water.mom.arrow }} {{ data.utilities.water.mom.label }} m<sup>3</sup>
+                        </span>
+                    {% else %}
+                        <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
+                    {% endif %}
+                </div>
+                <div class="telemetry-row">
+                    <span class="telemetry-label">YoY (vs {{ data.prev_year_label }})</span>
+                    {% if data.utilities.water.yoy %}
+                        <span class="var-pill" style="color: {{ data.utilities.water.yoy.color }}; background: {{ data.utilities.water.yoy.bg }};">
+                            {{ data.utilities.water.yoy.arrow }} {{ data.utilities.water.yoy.label }} m<sup>3</sup>
+                        </span>
+                    {% else %}
+                        <span style="color: #94a3b8; font-size: 0.75rem;">—</span>
+                    {% endif %}
+                </div>
             </div>
         </div>
-    </div>
+     </a>
 
 </div>
 
