@@ -22,3 +22,14 @@ class MonthlyUtilityBill(db.Model):
 
     def __repr__(self):
         return f"<MonthlyUtilityBill {self.month}>"
+
+class DailyWeatherCache(db.Model):
+    __tablename__ = 'daily_weather_cache'
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.String(10), nullable=False, unique=True)  # Format: "YYYY-MM-DD"
+    temp_mean = db.Column(db.Float, nullable=False)               # Mean Daily Temp (°C)
+    hdd_16 = db.Column(db.Float, nullable=False)                  # max(0, 16 - temp_mean)
+    cdd_20 = db.Column(db.Float, nullable=False)                  # max(0, temp_mean - 20)
+
+    def __repr__(self):
+        return f"<DailyWeatherCache {self.date}: T={self.temp_mean}°C>"

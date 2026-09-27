@@ -3,6 +3,8 @@ import calendar
 from utility_app import db
 from utility_app.models import UtilityEntry, MonthlyUtilityBill
 from utility_app.services.calculations import get_month_records_with_baseline
+from utility_app.services.weather_service import get_month_weather
+from utility_app.services.regression import build_weather_normalized_model
 
 def get_days_in_month(year: int, month: int) -> int:
     """Returns the total number of calendar days in a given month."""
@@ -159,18 +161,18 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
       - Current target month
       - Prior month (MoM)
       - Prior year same month (YoY)
-    Maps utility keys to column names and handles baseline logic.
+      - Weather-Normalized Regression Expected (HDD16 for Gas, CDD20 for Elec)
     """
     attr_map = {
-        'electricity': ('diff_elec', 'electricity_kwh', 'kWh', '#eab308'),
-        'gas': ('diff_gas', 'gas_kwh', 'kWh', '#f97316'),
-        'water': ('diff_water', 'water_m3', 'm³', '#0284c7')
+        'electricity': ('diff_elec', 'electricity_kwh', 'kWh', '#eab308', 'cdd_20'),
+        'gas': ('diff_gas', 'gas_kwh', 'kWh', '#f97316', 'hdd_16'),
+        'water': ('diff_water', 'water_m3', 'm³', '#0284c7', None)
     }
     
     if utility not in attr_map:
         utility = 'electricity'
         
-    diff_key, bill_col, unit, color = attr_map[utility]
+    diff_key, bill_col, unit, color, weather_key = attr_map[utility]
     year, month = map(int, target_month.split('-'))
     total_days = get_days_in_month(year, month)
     
@@ -188,7 +190,7 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
     prev_y_records = get_month_records_with_baseline(prev_y_str)
     prev_y_map = {int(r['date'].split('-')[2]): r[diff_key] for r in prev_y_records if r[diff_key] is not None}
     
-    # Check for macro statement fallback if daily data is absent
+    # Check for macro statement fallback
     prev_m_bill = MonthlyUtilityBill.query.filter_by(month=prev_m_str).first()
     prev_y_bill = MonthlyUtilityBill.query.filter_by(month=prev_y_str).first()
     
@@ -201,6 +203,35 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
     if not prev_y_map and prev_y_bill:
         py_y, py_m = map(int, prev_y_str.split('-'))
         prev_y_fallback = math.ceil(getattr(prev_y_bill, bill_col) / get_days_in_month(py_y, py_m))
+
+    # 4. Weather Data & Regression Model (Excluded for Water)
+    weather_map = get_month_weather(target_month) if weather_key else {}
+    regression_model = None
+    weather_expected_series = []
+
+    if weather_key and cur_map:
+        # Build training pairs (x = Degree Days, y = Consumption) for logged days
+        x_train, y_train = [], []
+        for day, y_val in cur_map.items():
+            d_str = f"{target_month}-{str(day).zfill(2)}"
+            if d_str in weather_map:
+                x_val = weather_map[d_str][weather_key]
+                x_train.append(x_val)
+                y_train.append(y_val)
+
+        regression_model = build_weather_normalized_model(x_train, y_train, utility)
+
+        # Generate expected Y for every day of the month based on daily weather
+        for day in range(1, total_days + 1):
+            d_str = f"{target_month}-{str(day).zfill(2)}"
+            if d_str in weather_map:
+                dd = weather_map[d_str][weather_key]
+                exp_y = math.ceil(regression_model['beta_0'] + (regression_model['beta_1'] * dd))
+                weather_expected_series.append(exp_y)
+            else:
+                weather_expected_series.append(None)
+    else:
+        weather_expected_series = [None] * total_days
 
     # Assemble aligned 1..total_days series
     labels = []
@@ -224,7 +255,6 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
         else:
             yoy_series.append(prev_y_fallback)
 
-    # Compute high-level telemetry stats for current period
     valid_cur = [v for v in current_series if v is not None]
     mtd_total = sum(valid_cur)
     daily_avg = math.ceil(mtd_total / len(valid_cur)) if valid_cur else 0
@@ -238,8 +268,8 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
         'target_month': target_month,
         'prev_month_label': prev_m_str,
         'prev_year_label': prev_y_str,
-        'has_mom_daily': bool(prev_m_map),
-        'has_yoy_daily': bool(prev_y_map),
+        'has_weather_model': bool(regression_model),
+        'regression_model': regression_model,
         'stats': {
             'mtd_total': mtd_total,
             'daily_avg': daily_avg,
@@ -252,6 +282,7 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
             'labels': labels,
             'current': current_series,
             'mom': mom_series,
-            'yoy': yoy_series
+            'yoy': yoy_series,
+            'weather_expected': weather_expected_series
         }
     }
