@@ -1,5 +1,8 @@
 import math
-from typing import List, Tuple, Dict, Any
+from typing import List, Tuple, Dict, Any, Optional
+
+# Fewer paired (degree-day, consumption) points than this can't support a fit
+MIN_TRAINING_POINTS = 3
 
 def compute_rmse(actuals: List[float], predictions: List[float]) -> float:
     """Calculates Root Mean Square Error (RMSE)."""
@@ -71,20 +74,16 @@ def fit_constrained_rmse_failsafe(x_vals: List[float], y_vals: List[float]) -> T
 
     return best_b0, best_b1, round(r2, 3)
 
-def build_weather_normalized_model(x_vals: List[float], y_vals: List[float], utility_type: str) -> Dict[str, Any]:
+def build_weather_normalized_model(x_vals: List[float], y_vals: List[float], utility_type: str) -> Optional[Dict[str, Any]]:
     """
     Main Weather Normalization Pipeline with RMSE minimization failsafe.
     x_vals: Degree Days (HDD for Gas, CDD for Electricity)
     y_vals: Actual Daily Consumption (kWh)
+    Returns None when there are too few points to fit a model.
     """
     n = len(x_vals)
-    if n < 3:
-        avg = int(math.ceil(sum(y_vals) / n)) if n > 0 else 0
-        return {
-            'beta_0': avg, 'beta_1': 0.0, 'r_squared': 0.0,
-            'rmse': 0, 'model_type': 'Insufficient Data Fallback',
-            'formula_str': f"Y = {avg:,d} kWh (Neutral Baseline)"
-        }
+    if n < MIN_TRAINING_POINTS:
+        return None
 
     # 1. Attempt standard OLS
     b0, b1, r2 = fit_ols(x_vals, y_vals)

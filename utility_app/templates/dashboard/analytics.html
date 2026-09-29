@@ -155,6 +155,13 @@
         <span style="font-size: 0.75rem; color: var(--text-muted);">Min. RMSE: <strong style="color: #0f172a;">{{ "{:,d}".format(data.regression_model.rmse | int) }} {{ data.unit }}</strong></span>
     </div>
 </div>
+{% elif data.weather_applicable %}
+<div class="model-tray">
+    <span style="font-size: 0.75rem; color: var(--text-muted);">
+        Weather model unavailable: needs at least 3 logged days with matching weather data
+        (weather is available up to about 5 days ago).
+    </span>
+</div>
 {% endif %}
 
 <!-- Interactive Chart Card -->

@@ -219,8 +219,10 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
                 x_train.append(x_val)
                 y_train.append(y_val)
 
+        # None when too few days have both a reading and weather data
         regression_model = build_weather_normalized_model(x_train, y_train, utility)
 
+    if regression_model:
         # Generate expected Y for every day of the month based on daily weather
         for day in range(1, total_days + 1):
             d_str = f"{target_month}-{str(day).zfill(2)}"
@@ -268,7 +270,8 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
         'target_month': target_month,
         'prev_month_label': prev_m_str,
         'prev_year_label': prev_y_str,
-        'has_weather_model': bool(regression_model),
+        'weather_applicable': weather_key is not None,
+        'has_weather_model': regression_model is not None,
         'regression_model': regression_model,
         'stats': {
             'mtd_total': mtd_total,
