@@ -1,0 +1,6 @@
+# Requires Python 3.10+
+Flask>=3.0,<4
+Flask-SQLAlchemy>=3.1,<4
+pandas>=2.0
+openpyxl>=3.1      # read .xlsx uploads via pandas.read_excel
+xlrd>=2.0          # read legacy .xls uploads via pandas.read_excel
