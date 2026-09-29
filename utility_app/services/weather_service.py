@@ -1,12 +1,16 @@
 import urllib.request
 import json
-from datetime import datetime
+from datetime import date, timedelta
 from utility_app import db
 from utility_app.models import DailyWeatherCache
 
 # Coordinates for Newcastle upon Tyne, UK
 LATITUDE = 54.9783
 LONGITUDE = -1.6178
+
+# The Open-Meteo archive only holds data up to roughly this many days ago.
+# Requesting any later date makes the whole request fail.
+ARCHIVE_LAG_DAYS = 5
 
 def fetch_and_cache_weather(start_date: str, end_date: str):
     """
@@ -71,8 +75,20 @@ def get_month_weather(month_str: str) -> dict:
     year, month = map(int, month_str.split('-'))
     num_days = calendar.monthrange(year, month)[1]
     
-    start_date = f"{month_str}-01"
-    end_date = f"{month_str}-{str(num_days).zfill(2)}"
+    # Cap the range at the latest day the archive can serve, so the current
+    # month still gets weather for the days that are available.
+    month_start = date(year, month, 1)
+    month_end = date(year, month, num_days)
+    latest_available = date.today() - timedelta(days=ARCHIVE_LAG_DAYS)
+    range_end = min(month_end, latest_available)
+
+    if range_end < month_start:
+        # Whole month is too recent (or in the future) for the archive
+        return {}
+
+    start_date = month_start.isoformat()
+    end_date = range_end.isoformat()
+    expected_days = (range_end - month_start).days + 1
 
     # Check local SQLite cache first
     cached_rows = DailyWeatherCache.query.filter(
@@ -81,7 +97,7 @@ def get_month_weather(month_str: str) -> dict:
     ).all()
 
     # If cache is incomplete, fetch and reload
-    if len(cached_rows) < num_days:
+    if len(cached_rows) < expected_days:
         fetch_and_cache_weather(start_date, end_date)
         cached_rows = DailyWeatherCache.query.filter(
             DailyWeatherCache.date >= start_date,
