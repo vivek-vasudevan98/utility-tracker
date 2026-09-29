@@ -4,6 +4,9 @@ from typing import List, Tuple, Dict, Any, Optional
 # Fewer paired (degree-day, consumption) points than this can't support a fit
 MIN_TRAINING_POINTS = 3
 
+# Below this R^2, consumption barely tracks degree days; flagged, not refitted
+WEAK_FIT_R2 = 0.15
+
 def compute_rmse(actuals: List[float], predictions: List[float]) -> float:
     """Calculates Root Mean Square Error (RMSE)."""
     if not actuals or len(actuals) != len(predictions):
@@ -39,35 +42,29 @@ def fit_ols(x_vals: List[float], y_vals: List[float]) -> Tuple[float, float, flo
 
     return beta_0, beta_1, round(r2, 3)
 
-def fit_constrained_rmse_failsafe(x_vals: List[float], y_vals: List[float]) -> Tuple[float, float, float]:
+def fit_constrained_least_squares(x_vals: List[float], y_vals: List[float]) -> Tuple[float, float, float]:
     """
-    Failsafe Optimizer:
-    Runs when OLS violates physical engineering bounds (e.g., negative slope or negative base load).
-    Performs grid search to find beta_0 >= 0 and beta_1 >= 0 that minimizes RMSE.
+    Exact least-squares fit subject to beta_0 >= 0 and beta_1 >= 0.
+    Only called when unconstrained OLS breaks a constraint, in which case the
+    optimum lies on the boundary: slope fixed at 0 (flat line at the mean),
+    intercept fixed at 0 (line through the origin), or both at 0.
+    Returns: (beta_0, beta_1, R_squared)
     """
-    min_y = min(y_vals)
     mean_y = sum(y_vals) / len(y_vals)
-    max_x = max(x_vals) if max(x_vals) > 0 else 1.0
+    sum_xx = sum(x * x for x in x_vals)
+    sum_xy = sum(x * y for x, y in zip(x_vals, y_vals))
 
-    # Search bounds
-    b0_candidates = [0.0, min_y * 0.25, min_y * 0.5, min_y * 0.75, min_y, mean_y]
-    max_slope = (max(y_vals) - min(y_vals)) / max_x if max_x > 0 else 10.0
-    b1_candidates = [0.0] + [max_slope * (i / 10.0) for i in range(1, 11)]
+    candidates = [
+        (max(0.0, mean_y), 0.0),                                   # beta_1 = 0
+        (0.0, max(0.0, sum_xy / sum_xx) if sum_xx > 0 else 0.0),   # beta_0 = 0
+        (0.0, 0.0),
+    ]
 
-    best_b0 = mean_y
-    best_b1 = 0.0
-    min_error = float('inf')
+    def sse(b0: float, b1: float) -> float:
+        return sum((y - (b0 + b1 * x)) ** 2 for x, y in zip(x_vals, y_vals))
 
-    for b0 in b0_candidates:
-        for b1 in b1_candidates:
-            preds = [b0 + (b1 * x) for x in x_vals]
-            err = compute_rmse(y_vals, preds)
-            if err < min_error:
-                min_error = err
-                best_b0 = b0
-                best_b1 = b1
+    best_b0, best_b1 = min(candidates, key=lambda c: sse(*c))
 
-    # Approximate R^2 for failsafe fit
     var_y = sum((y - mean_y) ** 2 for y in y_vals)
     ss_res = sum((y - (best_b0 + best_b1 * x)) ** 2 for x, y in zip(x_vals, y_vals))
     r2 = max(0.0, 1.0 - (ss_res / var_y)) if var_y > 0 else 0.0
@@ -76,7 +73,7 @@ def fit_constrained_rmse_failsafe(x_vals: List[float], y_vals: List[float]) -> T
 
 def build_weather_normalized_model(x_vals: List[float], y_vals: List[float], utility_type: str) -> Optional[Dict[str, Any]]:
     """
-    Main Weather Normalization Pipeline with RMSE minimization failsafe.
+    Main Weather Normalization Pipeline with a constrained least-squares fallback.
     x_vals: Degree Days (HDD for Gas, CDD for Electricity)
     y_vals: Actual Daily Consumption (kWh)
     Returns None when there are too few points to fit a model.
@@ -87,18 +84,20 @@ def build_weather_normalized_model(x_vals: List[float], y_vals: List[float], uti
 
     # 1. Attempt standard OLS
     b0, b1, r2 = fit_ols(x_vals, y_vals)
-    preds = [b0 + (b1 * x) for x in x_vals]
-    rmse = compute_rmse(y_vals, preds)
     model_type = "Ordinary Least Squares (OLS)"
 
     # 2. Physics & Engineering Boundary Check:
-    # Baseload cannot be negative (b0 >= 0), slope must be non-negative (b1 >= 0)
-    if b0 < 0 or b1 < 0 or r2 < 0.15:
-        # Failsafe Activated: minimize RMSE with physical constraints
-        b0, b1, r2 = fit_constrained_rmse_failsafe(x_vals, y_vals)
-        preds = [b0 + (b1 * x) for x in x_vals]
-        rmse = compute_rmse(y_vals, preds)
-        model_type = "Constrained RMSE-Minimization Failsafe"
+    # Baseload cannot be negative (b0 >= 0), slope must be non-negative (b1 >= 0).
+    # A low R^2 is not a constraint violation: OLS is already the best fit.
+    if b0 < 0 or b1 < 0:
+        b0, b1, r2 = fit_constrained_least_squares(x_vals, y_vals)
+        model_type = "Constrained Least Squares (β₀ ≥ 0, β₁ ≥ 0)"
+
+    if r2 < WEAK_FIT_R2:
+        model_type += " — weak weather dependence"
+
+    preds = [b0 + (b1 * x) for x in x_vals]
+    rmse = compute_rmse(y_vals, preds)
 
     b0_int = int(math.ceil(b0))
     b1_round = round(b1, 2)
