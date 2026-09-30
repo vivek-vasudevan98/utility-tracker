@@ -48,18 +48,20 @@ def build_weather_baseline(diff_key: str, weather_key: str, utility: str,
     # One cached weather lookup covering training days and the target month
     weather = get_weather_range(long_start - lag, month_end - lag)
 
-    x_vals, y_vals, is_recent = [], [], []
+    long_x, long_y, recent_x, recent_y = [], [], [], []
     for r in training_records:
         reading_day = date.fromisoformat(r['date'])
         w = weather.get((reading_day - lag).isoformat())
         if w is None:
             continue
-        x_vals.append(w[weather_key])
-        y_vals.append(r[diff_key])
-        is_recent.append(reading_day >= recent_start)
+        long_x.append(w[weather_key])
+        long_y.append(r[diff_key])
+        if reading_day >= recent_start:
+            recent_x.append(w[weather_key])
+            recent_y.append(r[diff_key])
 
-    result['training_days'] = len(x_vals)
-    model = build_weather_normalized_model(x_vals, y_vals, is_recent, utility)
+    result['training_days'] = len(long_x)
+    model = build_weather_normalized_model(long_x, long_y, recent_x, recent_y, utility)
     if model is None:
         return result
 

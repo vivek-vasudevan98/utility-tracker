@@ -155,13 +155,13 @@
         <span style="font-size: 0.75rem; color: #64748b;">({{ data.regression_model.model_type }})</span>
     </div>
     <div style="display: flex; gap: 1rem;">
-        <span style="font-size: 0.75rem; color: var(--text-muted);">Weather R² (12 months): <strong style="color: #0f172a;">{{ data.regression_model.r_squared }}</strong></span>
+        <span style="font-size: 0.75rem; color: var(--text-muted);">R² (12-month fit): <strong style="color: #0f172a;">{{ data.regression_model.r_squared }}</strong></span>
         <span style="font-size: 0.75rem; color: var(--text-muted);">RMSE ({{ data.regression_model.rmse_window }}): <strong style="color: #0f172a;">{{ "{:,d}".format(data.regression_model.rmse | int) }} {{ data.unit }}</strong></span>
     </div>
     <div style="flex-basis: 100%; font-size: 0.72rem; color: var(--text-muted);">
         Trained on {{ data.regression_model.training_days }} days ({{ data.weather_baseline.training_period }});
-        base load for {{ data.weather_baseline.recent_period }} ({{ data.regression_model.recent_days }} days)
-        vs earlier months: {{ "{:+,d}".format(data.regression_model.base_load_adjustment) }} {{ data.unit }}/day
+        base load recalibrated on {{ data.weather_baseline.recent_period }} ({{ data.regression_model.recent_days }} days):
+        {{ "{:+,d}".format(data.regression_model.base_load_adjustment) }} {{ data.unit }}/day
     </div>
 </div>
 {% elif data.weather_applicable %}
