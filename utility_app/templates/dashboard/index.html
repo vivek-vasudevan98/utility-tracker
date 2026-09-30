@@ -138,7 +138,7 @@
             </div>
 
             <div class="telemetry-tray">
-                {% if data.days_logged < data.total_days %}
+                {% if not data.is_complete %}
                 <div class="telemetry-row">
                     <span class="telemetry-label">EST. M-END</span>
                     <span class="telemetry-val">{{ "{:,d}".format(data.utilities.electricity.predicted) }} kWh</span>
@@ -181,7 +181,7 @@
             </div>
 
             <div class="telemetry-tray">
-                {% if data.days_logged < data.total_days %}
+                {% if not data.is_complete %}
                 <div class="telemetry-row">
                     <span class="telemetry-label">EST. M-END</span>
                     <span class="telemetry-val">{{ "{:,d}".format(data.utilities.gas.predicted) }} kWh</span>
@@ -224,7 +224,7 @@
             </div>
 
             <div class="telemetry-tray">
-                {% if data.days_logged < data.total_days %}
+                {% if not data.is_complete %}
                 <div class="telemetry-row">
                     <span class="telemetry-label">EST. M-END</span>
                     <span class="telemetry-val">{{ "{:,d}".format(data.utilities.water.predicted) }} m<sup>3</sup></span>
