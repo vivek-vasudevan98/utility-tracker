@@ -95,6 +95,10 @@
         border-radius: 4px;
         transition: all 0.15s ease;
     }
+    .toggle-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
     .toggle-btn.active {
         background: #ffffff;
         color: #0f172a;
@@ -151,15 +155,20 @@
         <span style="font-size: 0.75rem; color: #64748b;">({{ data.regression_model.model_type }})</span>
     </div>
     <div style="display: flex; gap: 1rem;">
-        <span style="font-size: 0.75rem; color: var(--text-muted);">Goodness of Fit (R²): <strong style="color: #0f172a;">{{ data.regression_model.r_squared }}</strong></span>
-        <span style="font-size: 0.75rem; color: var(--text-muted);">Min. RMSE: <strong style="color: #0f172a;">{{ "{:,d}".format(data.regression_model.rmse | int) }} {{ data.unit }}</strong></span>
+        <span style="font-size: 0.75rem; color: var(--text-muted);">R² (12-month fit): <strong style="color: #0f172a;">{{ data.regression_model.r_squared }}</strong></span>
+        <span style="font-size: 0.75rem; color: var(--text-muted);">RMSE ({{ data.regression_model.rmse_window }}): <strong style="color: #0f172a;">{{ "{:,d}".format(data.regression_model.rmse | int) }} {{ data.unit }}</strong></span>
+    </div>
+    <div style="flex-basis: 100%; font-size: 0.72rem; color: var(--text-muted);">
+        Trained on {{ data.regression_model.training_days }} days ({{ data.weather_baseline.training_period }});
+        base load recalibrated on {{ data.weather_baseline.recent_period }} ({{ data.regression_model.recent_days }} days):
+        {{ "{:+,d}".format(data.regression_model.base_load_adjustment) }} {{ data.unit }}/day
     </div>
 </div>
 {% elif data.weather_applicable %}
 <div class="model-tray">
     <span style="font-size: 0.75rem; color: var(--text-muted);">
-        Weather model unavailable: needs at least 3 logged days with matching weather data
-        (weather is available up to about 5 days ago).
+        Weather model unavailable: needs {{ data.weather_baseline.min_training_days }} days of training data
+        ({{ data.weather_baseline.training_period }}), {{ data.weather_baseline.training_days }} available.
     </span>
 </div>
 {% endif %}
@@ -180,6 +189,10 @@
             <button type="button" class="toggle-btn" id="btn-yoy" onclick="switchBenchmark('yoy')">vs YoY</button>
             {% if data.has_weather_model %}
                 <button type="button" class="toggle-btn" id="btn-weather" onclick="switchBenchmark('weather')">vs Weather-Expected</button>
+            {% elif data.weather_applicable %}
+                <span title="Needs {{ data.weather_baseline.min_training_days }} days of training data, {{ data.weather_baseline.training_days }} available">
+                    <button type="button" class="toggle-btn" id="btn-weather" disabled>vs Weather-Expected</button>
+                </span>
             {% endif %}
         </div>
     </div>

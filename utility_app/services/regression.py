@@ -1,8 +1,17 @@
 import math
 from typing import List, Tuple, Dict, Any, Optional
 
-# Fewer paired (degree-day, consumption) points than this can't support a fit
-MIN_TRAINING_POINTS = 3
+# --- Weather model configuration ---
+# Layer 1 (long-term) window: sets the weather slope; older data is ignored
+BASELINE_MONTHS = 12
+# Layer 2 (recent) window: recalibrates the base load with the slope held fixed
+RECENT_MONTHS = 3
+# Layer 1 needs at least this many (degree-day, consumption) days to fit
+MIN_TRAINING_DAYS = 90
+# Recent days needed before layer 2 fully replaces the long-term base load
+RECENT_FULL_WEIGHT_DAYS = 30
+# Readings are taken each morning, so a reading on day D mostly reflects day D-1
+WEATHER_LAG_DAYS = 1
 
 # Below this R^2, consumption barely tracks degree days; flagged, not refitted
 WEAK_FIT_R2 = 0.15
@@ -71,45 +80,62 @@ def fit_constrained_least_squares(x_vals: List[float], y_vals: List[float]) -> T
 
     return best_b0, best_b1, round(r2, 3)
 
-def build_weather_normalized_model(x_vals: List[float], y_vals: List[float], utility_type: str) -> Optional[Dict[str, Any]]:
+def build_weather_normalized_model(
+    long_x: List[float], long_y: List[float],
+    recent_x: List[float], recent_y: List[float],
+    utility_type: str
+) -> Optional[Dict[str, Any]]:
     """
-    Main Weather Normalization Pipeline with a constrained least-squares fallback.
-    x_vals: Degree Days (HDD for Gas, CDD for Electricity)
-    y_vals: Actual Daily Consumption (kWh)
-    Returns None when there are too few points to fit a model.
+    Two-layer weather normalization model.
+      Layer 1 (long_x/long_y, last BASELINE_MONTHS): fits base load and weather
+        slope, with a constrained least-squares fallback.
+      Layer 2 (recent_x/recent_y, last RECENT_MONTHS): keeps the slope fixed and
+        recalibrates the base load, blended in until RECENT_FULL_WEIGHT_DAYS.
+    x values: previous-day Degree Days (HDD for Gas, CDD for Electricity)
+    y values: Actual Daily Consumption (kWh)
+    Returns None when layer 1 has fewer than MIN_TRAINING_DAYS points.
     """
-    n = len(x_vals)
-    if n < MIN_TRAINING_POINTS:
+    if len(long_x) < MIN_TRAINING_DAYS:
         return None
 
-    # 1. Attempt standard OLS
-    b0, b1, r2 = fit_ols(x_vals, y_vals)
+    # Layer 1: standard OLS over the long window
+    b0_long, b1, r2 = fit_ols(long_x, long_y)
     model_type = "Ordinary Least Squares (OLS)"
 
-    # 2. Physics & Engineering Boundary Check:
+    # Physics & Engineering Boundary Check:
     # Baseload cannot be negative (b0 >= 0), slope must be non-negative (b1 >= 0).
     # A low R^2 is not a constraint violation: OLS is already the best fit.
-    if b0 < 0 or b1 < 0:
-        b0, b1, r2 = fit_constrained_least_squares(x_vals, y_vals)
+    if b0_long < 0 or b1 < 0:
+        b0_long, b1, r2 = fit_constrained_least_squares(long_x, long_y)
         model_type = "Constrained Least Squares (β₀ ≥ 0, β₁ ≥ 0)"
 
     if r2 < WEAK_FIT_R2:
         model_type += " — weak weather dependence"
 
-    preds = [b0 + (b1 * x) for x in x_vals]
-    rmse = compute_rmse(y_vals, preds)
+    # Layer 2: recalibrate base load on recent days, slope held fixed
+    n_recent = len(recent_x)
+    b0 = b0_long
+    if n_recent:
+        b0_recent = max(0.0, sum(y - b1 * x for x, y in zip(recent_x, recent_y)) / n_recent)
+        weight = min(1.0, n_recent / RECENT_FULL_WEIGHT_DAYS)
+        b0 = weight * b0_recent + (1 - weight) * b0_long
 
-    b0_int = int(math.ceil(b0))
-    b1_round = round(b1, 2)
+    # Accuracy of the final model on the most recent data available
+    eval_x, eval_y = (recent_x, recent_y) if n_recent else (long_x, long_y)
+    rmse = compute_rmse(eval_y, [b0 + b1 * x for x in eval_x])
+
     dd_var = "HDD₁₆" if utility_type == 'gas' else "CDD₂₀"
-    
-    formula_str = f"Ŷ = {b0_int:,d} + ({b1_round} × {dd_var})"
+    formula_str = f"Ŷ = {int(math.ceil(b0)):,d} + ({round(b1, 2)} × {dd_var} of previous day)"
 
     return {
-        'beta_0': b0_int,
-        'beta_1': b1_round,
+        'beta_0': b0,
+        'beta_1': b1,
         'r_squared': r2,
         'rmse': int(math.ceil(rmse)),
+        'rmse_window': f"last {RECENT_MONTHS} months" if n_recent else f"{BASELINE_MONTHS}-month window",
+        'training_days': len(long_x),
+        'recent_days': n_recent,
+        'base_load_adjustment': int(round(b0 - b0_long)),
         'model_type': model_type,
         'formula_str': formula_str
     }

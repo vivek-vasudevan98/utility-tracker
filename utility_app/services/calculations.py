@@ -1,5 +1,5 @@
 import math
-from datetime import date
+from datetime import date, timedelta
 from utility_app.models import UtilityEntry
 
 def is_next_day(previous_date: str, current_date: str) -> bool:
@@ -81,3 +81,20 @@ def get_month_records_with_baseline(selected_month):
         return computed[1:]
     
     return computed
+
+
+def get_daily_usage(start: date, end: date):
+    """
+    Returns records with a known daily usage figure dated start..end (inclusive).
+    The reading from the day before `start` is included in the query so the
+    first day can still get a delta; readings after a gap are dropped.
+    """
+    entries = UtilityEntry.query.filter(
+        UtilityEntry.date >= (start - timedelta(days=1)).isoformat(),
+        UtilityEntry.date <= end.isoformat()
+    ).order_by(UtilityEntry.date.asc()).all()
+
+    return [
+        r for r in calculate_deltas(entries)
+        if r['date'] >= start.isoformat() and r['diff_elec'] is not None
+    ]

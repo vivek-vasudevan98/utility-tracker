@@ -66,29 +66,23 @@ def fetch_and_cache_weather(start_date: str, end_date: str):
         print(f"Weather API Fetch Error ({start_date} to {end_date}): {e}")
         return False
 
-def get_month_weather(month_str: str) -> dict:
+def get_weather_range(start: date, end: date) -> dict:
     """
-    Returns a dictionary of date -> {temp_mean, hdd_16, cdd_20} for the month.
-    If dates are missing in SQLite cache, queries Open-Meteo automatically.
+    Returns a dictionary of date -> {temp_mean, hdd_16, cdd_20} for start..end (inclusive).
+    If dates are missing in SQLite cache, queries Open-Meteo once for the whole range.
     """
-    import calendar
-    year, month = map(int, month_str.split('-'))
-    num_days = calendar.monthrange(year, month)[1]
-    
-    # Cap the range at the latest day the archive can serve, so the current
-    # month still gets weather for the days that are available.
-    month_start = date(year, month, 1)
-    month_end = date(year, month, num_days)
+    # Cap the range at the latest day the archive can serve, so recent
+    # periods still get weather for the days that are available.
     latest_available = date.today() - timedelta(days=ARCHIVE_LAG_DAYS)
-    range_end = min(month_end, latest_available)
+    range_end = min(end, latest_available)
 
-    if range_end < month_start:
-        # Whole month is too recent (or in the future) for the archive
+    if range_end < start:
+        # Whole range is too recent (or in the future) for the archive
         return {}
 
-    start_date = month_start.isoformat()
+    start_date = start.isoformat()
     end_date = range_end.isoformat()
-    expected_days = (range_end - month_start).days + 1
+    expected_days = (range_end - start).days + 1
 
     # Check local SQLite cache first
     cached_rows = DailyWeatherCache.query.filter(

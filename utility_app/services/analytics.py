@@ -1,14 +1,76 @@
 import math
 import calendar
+from datetime import date, timedelta
 from utility_app import db
-from utility_app.models import UtilityEntry, MonthlyUtilityBill
-from utility_app.services.calculations import get_month_records_with_baseline
-from utility_app.services.weather_service import get_month_weather
-from utility_app.services.regression import build_weather_normalized_model
+from utility_app.models import MonthlyUtilityBill
+from utility_app.services.calculations import get_month_records_with_baseline, get_daily_usage
+from utility_app.services.weather_service import get_weather_range
+from utility_app.services.regression import (
+    build_weather_normalized_model, BASELINE_MONTHS, RECENT_MONTHS,
+    MIN_TRAINING_DAYS, WEATHER_LAG_DAYS
+)
 
 def get_days_in_month(year: int, month: int) -> int:
     """Returns the total number of calendar days in a given month."""
     return calendar.monthrange(year, month)[1]
+
+def shift_months(month_start: date, months: int) -> date:
+    """Returns the first day of the month `months` away from month_start (a 1st)."""
+    years, month_index = divmod(month_start.month - 1 + months, 12)
+    return date(month_start.year + years, month_index + 1, 1)
+
+def build_weather_baseline(diff_key: str, weather_key: str, utility: str,
+                           month_start: date, month_end: date) -> dict:
+    """
+    Trains the two-layer weather model on readings from before the target month
+    (never the month itself) and projects the expected daily series for it.
+    Each day's usage is paired with the previous day's weather (WEATHER_LAG_DAYS).
+    """
+    lag = timedelta(days=WEATHER_LAG_DAYS)
+    long_start = shift_months(month_start, -BASELINE_MONTHS)
+    recent_start = shift_months(month_start, -RECENT_MONTHS)
+    train_end = month_start - timedelta(days=1)
+
+    training_records = get_daily_usage(long_start, train_end)
+    result = {
+        'model': None,
+        'expected': [None] * month_end.day,
+        'training_days': len(training_records),
+        'min_training_days': MIN_TRAINING_DAYS,
+        'training_period': f"{long_start:%b %Y} – {train_end:%b %Y}",
+        'recent_period': f"{recent_start:%b %Y} – {train_end:%b %Y}",
+    }
+
+    # Not enough readings to reach the minimum: skip the weather fetch entirely
+    if len(training_records) < MIN_TRAINING_DAYS:
+        return result
+
+    # One cached weather lookup covering training days and the target month
+    weather = get_weather_range(long_start - lag, month_end - lag)
+
+    long_x, long_y, recent_x, recent_y = [], [], [], []
+    for r in training_records:
+        reading_day = date.fromisoformat(r['date'])
+        w = weather.get((reading_day - lag).isoformat())
+        if w is None:
+            continue
+        long_x.append(w[weather_key])
+        long_y.append(r[diff_key])
+        if reading_day >= recent_start:
+            recent_x.append(w[weather_key])
+            recent_y.append(r[diff_key])
+
+    result['training_days'] = len(long_x)
+    model = build_weather_normalized_model(long_x, long_y, recent_x, recent_y, utility)
+    if model is None:
+        return result
+
+    result['model'] = model
+    for i in range(month_end.day):
+        w = weather.get((month_start + timedelta(days=i) - lag).isoformat())
+        if w is not None:
+            result['expected'][i] = math.ceil(model['beta_0'] + model['beta_1'] * w[weather_key])
+    return result
 
 def sync_completed_month_bill(month_str: str):
     """
@@ -205,36 +267,15 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
         py_y, py_m = map(int, prev_y_str.split('-'))
         prev_y_fallback = math.ceil(getattr(prev_y_bill, bill_col) / get_days_in_month(py_y, py_m))
 
-    # 4. Weather Data & Regression Model (Excluded for Water)
-    weather_map = get_month_weather(target_month) if weather_key else {}
-    regression_model = None
-    weather_expected_series = []
-
-    if weather_key and cur_map:
-        # Build training pairs (x = Degree Days, y = Consumption) for logged days
-        x_train, y_train = [], []
-        for day, y_val in cur_map.items():
-            d_str = f"{target_month}-{str(day).zfill(2)}"
-            if d_str in weather_map:
-                x_val = weather_map[d_str][weather_key]
-                x_train.append(x_val)
-                y_train.append(y_val)
-
-        # None when too few days have both a reading and weather data
-        regression_model = build_weather_normalized_model(x_train, y_train, utility)
-
-    if regression_model:
-        # Generate expected Y for every day of the month based on daily weather
-        for day in range(1, total_days + 1):
-            d_str = f"{target_month}-{str(day).zfill(2)}"
-            if d_str in weather_map:
-                dd = weather_map[d_str][weather_key]
-                exp_y = math.ceil(regression_model['beta_0'] + (regression_model['beta_1'] * dd))
-                weather_expected_series.append(exp_y)
-            else:
-                weather_expected_series.append(None)
-    else:
-        weather_expected_series = [None] * total_days
+    # 4. Weather-Normalized Baseline (Excluded for Water)
+    baseline = None
+    if weather_key:
+        baseline = build_weather_baseline(
+            diff_key, weather_key, utility,
+            date(year, month, 1), date(year, month, total_days)
+        )
+    regression_model = baseline['model'] if baseline else None
+    weather_expected_series = baseline['expected'] if baseline else [None] * total_days
 
     # Assemble aligned 1..total_days series
     labels = []
@@ -274,6 +315,7 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
         'weather_applicable': weather_key is not None,
         'has_weather_model': regression_model is not None,
         'regression_model': regression_model,
+        'weather_baseline': baseline,
         'stats': {
             'mtd_total': mtd_total,
             'daily_avg': daily_avg,
