@@ -1,19 +1,20 @@
 import math
+from itertools import product
 from typing import List, Tuple, Dict, Any, Optional
 
 # --- Weather model configuration ---
-# Layer 1 (long-term) window: sets the weather slope; older data is ignored
+# Training window: sets the weather slope; older data is ignored
 BASELINE_MONTHS = 12
-# Layer 2 (recent) window: recalibrates the base load with the slope held fixed
+# Recent window: gets its own base load level, fitted jointly with the slope
 RECENT_MONTHS = 3
-# Layer 1 needs at least this many (degree-day, consumption) days to fit
+# The training window needs at least this many (degree-day, consumption) days
 MIN_TRAINING_DAYS = 90
-# Recent days needed before layer 2 fully replaces the long-term base load
+# Recent days needed before the recent base load is used in full
 RECENT_FULL_WEIGHT_DAYS = 30
 # Readings are taken each morning, so a reading on day D mostly reflects day D-1
 WEATHER_LAG_DAYS = 1
 
-# Below this R^2, consumption barely tracks degree days; flagged, not refitted
+# Below this weather R^2, consumption barely tracks degree days; flagged, not refitted
 WEAK_FIT_R2 = 0.15
 
 def compute_rmse(actuals: List[float], predictions: List[float]) -> float:
@@ -23,119 +24,135 @@ def compute_rmse(actuals: List[float], predictions: List[float]) -> float:
     mse = sum((a - p) ** 2 for a, p in zip(actuals, predictions)) / len(actuals)
     return math.sqrt(mse)
 
-def fit_ols(x_vals: List[float], y_vals: List[float]) -> Tuple[float, float, float]:
+def fit_period_baseline(
+    x_vals: List[float], y_vals: List[float], is_recent: List[bool]
+) -> Tuple[Dict[bool, float], float, bool]:
     """
-    Closed-form Ordinary Least Squares (OLS):
-    Returns: (beta_0 / Intercept, beta_1 / Slope, R_squared)
+    Least-squares fit of  y = base[period] + slope * x  with one shared slope and a
+    separate base load for the recent period and the earlier period, subject to
+    every base >= 0 and slope >= 0.
+
+    The problem is convex, so its optimum is the best feasible solution among the
+    candidates where each constraint is either free or held at 0:
+      - a free base is the period's mean of (y - slope * x),
+      - the slope is fitted from within-period variation (sums centred on the
+        period mean for a free base, raw sums for a base held at 0).
+    Returns: ({is_recent: base}, slope, constrained) for the periods present.
     """
-    n = len(x_vals)
-    mean_x = sum(x_vals) / n
-    mean_y = sum(y_vals) / n
+    periods = {}
+    for x, y, recent in zip(x_vals, y_vals, is_recent):
+        periods.setdefault(recent, ([], []))
+        periods[recent][0].append(x)
+        periods[recent][1].append(y)
 
-    cov_xy = sum((x - mean_x) * (y - mean_y) for x, y in zip(x_vals, y_vals))
-    var_x = sum((x - mean_x) ** 2 for x in x_vals)
-    var_y = sum((y - mean_y) ** 2 for y in y_vals)
+    def solve(free_bases: Dict[bool, bool], free_slope: bool):
+        slope = 0.0
+        if free_slope:
+            num = den = 0.0
+            for p, (xs, ys) in periods.items():
+                mx = sum(xs) / len(xs) if free_bases[p] else 0.0
+                my = sum(ys) / len(ys) if free_bases[p] else 0.0
+                num += sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+                den += sum((x - mx) ** 2 for x in xs)
+            slope = num / den if den > 0 else 0.0
+        bases = {
+            p: (sum(y - slope * x for x, y in zip(xs, ys)) / len(xs) if free_bases[p] else 0.0)
+            for p, (xs, ys) in periods.items()
+        }
+        return bases, slope
 
-    if var_x == 0:
-        return mean_y, 0.0, 0.0
+    def sse(bases: Dict[bool, float], slope: float) -> float:
+        return sum(
+            (y - bases[p] - slope * x) ** 2
+            for p, (xs, ys) in periods.items() for x, y in zip(xs, ys)
+        )
 
-    beta_1 = cov_xy / var_x
-    beta_0 = mean_y - (beta_1 * mean_x)
+    keys = list(periods)
+    unconstrained = solve({p: True for p in keys}, True)
+    best, best_err = None, float('inf')
+    for free_slope in (True, False):
+        for flags in product((True, False), repeat=len(keys)):
+            bases, slope = solve(dict(zip(keys, flags)), free_slope)
+            if slope < 0 or any(b < 0 for b in bases.values()):
+                continue
+            err = sse(bases, slope)
+            if err < best_err - 1e-9:
+                best, best_err = (bases, slope), err
 
-    # R^2 calculation
-    if var_y == 0:
-        r2 = 1.0
-    else:
-        ss_res = sum((y - (beta_0 + beta_1 * x)) ** 2 for x, y in zip(x_vals, y_vals))
-        r2 = max(0.0, 1.0 - (ss_res / var_y))
+    bases, slope = best
+    constrained = (bases, slope) != unconstrained
+    return bases, slope, constrained
 
-    return beta_0, beta_1, round(r2, 3)
-
-def fit_constrained_least_squares(x_vals: List[float], y_vals: List[float]) -> Tuple[float, float, float]:
+def weather_r_squared(x_vals: List[float], y_vals: List[float], is_recent: List[bool],
+                      bases: Dict[bool, float], slope: float) -> float:
     """
-    Exact least-squares fit subject to beta_0 >= 0 and beta_1 >= 0.
-    Only called when unconstrained OLS breaks a constraint, in which case the
-    optimum lies on the boundary: slope fixed at 0 (flat line at the mean),
-    intercept fixed at 0 (line through the origin), or both at 0.
-    Returns: (beta_0, beta_1, R_squared)
+    Share of the variation around each period's own average that the weather
+    term explains, so a base-load shift between periods doesn't inflate it.
     """
-    mean_y = sum(y_vals) / len(y_vals)
-    sum_xx = sum(x * x for x in x_vals)
-    sum_xy = sum(x * y for x, y in zip(x_vals, y_vals))
+    sums = {}
+    for y, recent in zip(y_vals, is_recent):
+        total, count = sums.get(recent, (0.0, 0))
+        sums[recent] = (total + y, count + 1)
+    means = {p: total / count for p, (total, count) in sums.items()}
 
-    candidates = [
-        (max(0.0, mean_y), 0.0),                                   # beta_1 = 0
-        (0.0, max(0.0, sum_xy / sum_xx) if sum_xx > 0 else 0.0),   # beta_0 = 0
-        (0.0, 0.0),
-    ]
-
-    def sse(b0: float, b1: float) -> float:
-        return sum((y - (b0 + b1 * x)) ** 2 for x, y in zip(x_vals, y_vals))
-
-    best_b0, best_b1 = min(candidates, key=lambda c: sse(*c))
-
-    var_y = sum((y - mean_y) ** 2 for y in y_vals)
-    ss_res = sum((y - (best_b0 + best_b1 * x)) ** 2 for x, y in zip(x_vals, y_vals))
-    r2 = max(0.0, 1.0 - (ss_res / var_y)) if var_y > 0 else 0.0
-
-    return best_b0, best_b1, round(r2, 3)
+    ss_within = sum((y - means[p]) ** 2 for y, p in zip(y_vals, is_recent))
+    ss_res = sum((y - bases[p] - slope * x) ** 2 for x, y, p in zip(x_vals, y_vals, is_recent))
+    if ss_within == 0:
+        return 1.0 if ss_res == 0 else 0.0
+    return round(max(0.0, 1.0 - ss_res / ss_within), 3)
 
 def build_weather_normalized_model(
-    long_x: List[float], long_y: List[float],
-    recent_x: List[float], recent_y: List[float],
-    utility_type: str
+    x_vals: List[float], y_vals: List[float], is_recent: List[bool], utility_type: str
 ) -> Optional[Dict[str, Any]]:
     """
-    Two-layer weather normalization model.
-      Layer 1 (long_x/long_y, last BASELINE_MONTHS): fits base load and weather
-        slope, with a constrained least-squares fallback.
-      Layer 2 (recent_x/recent_y, last RECENT_MONTHS): keeps the slope fixed and
-        recalibrates the base load, blended in until RECENT_FULL_WEIGHT_DAYS.
+    Two-layer weather normalization model, fitted in one step over the last
+    BASELINE_MONTHS: one weather slope shared by the whole window, plus separate
+    base loads for the last RECENT_MONTHS and the months before them. The recent
+    base load is used for predictions, blended in until RECENT_FULL_WEIGHT_DAYS.
     x values: previous-day Degree Days (HDD for Gas, CDD for Electricity)
     y values: Actual Daily Consumption (kWh)
-    Returns None when layer 1 has fewer than MIN_TRAINING_DAYS points.
+    is_recent: whether each day falls in the recent window
+    Returns None when there are fewer than MIN_TRAINING_DAYS points.
     """
-    if len(long_x) < MIN_TRAINING_DAYS:
+    if len(x_vals) < MIN_TRAINING_DAYS:
         return None
 
-    # Layer 1: standard OLS over the long window
-    b0_long, b1, r2 = fit_ols(long_x, long_y)
-    model_type = "Ordinary Least Squares (OLS)"
+    bases, slope, constrained = fit_period_baseline(x_vals, y_vals, is_recent)
+    r2 = weather_r_squared(x_vals, y_vals, is_recent, bases, slope)
 
-    # Physics & Engineering Boundary Check:
-    # Baseload cannot be negative (b0 >= 0), slope must be non-negative (b1 >= 0).
-    # A low R^2 is not a constraint violation: OLS is already the best fit.
-    if b0_long < 0 or b1 < 0:
-        b0_long, b1, r2 = fit_constrained_least_squares(long_x, long_y)
-        model_type = "Constrained Least Squares (β₀ ≥ 0, β₁ ≥ 0)"
-
+    model_type = (
+        "Constrained Least Squares (bases ≥ 0, slope ≥ 0)" if constrained
+        else "Ordinary Least Squares (OLS)"
+    )
     if r2 < WEAK_FIT_R2:
         model_type += " — weak weather dependence"
 
-    # Layer 2: recalibrate base load on recent days, slope held fixed
-    n_recent = len(recent_x)
-    b0 = b0_long
-    if n_recent:
-        b0_recent = max(0.0, sum(y - b1 * x for x, y in zip(recent_x, recent_y)) / n_recent)
-        weight = min(1.0, n_recent / RECENT_FULL_WEIGHT_DAYS)
-        b0 = weight * b0_recent + (1 - weight) * b0_long
+    # Base load for predictions: recent level, blended in by recent sample size
+    n_recent = sum(is_recent)
+    earlier_base = bases.get(False, bases.get(True))
+    recent_base = bases.get(True, earlier_base)
+    weight = min(1.0, n_recent / RECENT_FULL_WEIGHT_DAYS)
+    b0 = weight * recent_base + (1 - weight) * earlier_base
 
     # Accuracy of the final model on the most recent data available
-    eval_x, eval_y = (recent_x, recent_y) if n_recent else (long_x, long_y)
-    rmse = compute_rmse(eval_y, [b0 + b1 * x for x in eval_x])
+    if n_recent:
+        eval_pairs = [(x, y) for x, y, r in zip(x_vals, y_vals, is_recent) if r]
+    else:
+        eval_pairs = list(zip(x_vals, y_vals))
+    rmse = compute_rmse([y for _, y in eval_pairs], [b0 + slope * x for x, _ in eval_pairs])
 
     dd_var = "HDD₁₆" if utility_type == 'gas' else "CDD₂₀"
-    formula_str = f"Ŷ = {int(math.ceil(b0)):,d} + ({round(b1, 2)} × {dd_var} of previous day)"
+    formula_str = f"Ŷ = {int(math.ceil(b0)):,d} + ({round(slope, 2)} × {dd_var} of previous day)"
 
     return {
         'beta_0': b0,
-        'beta_1': b1,
+        'beta_1': slope,
         'r_squared': r2,
         'rmse': int(math.ceil(rmse)),
         'rmse_window': f"last {RECENT_MONTHS} months" if n_recent else f"{BASELINE_MONTHS}-month window",
-        'training_days': len(long_x),
+        'training_days': len(x_vals),
         'recent_days': n_recent,
-        'base_load_adjustment': int(round(b0 - b0_long)),
+        'base_load_adjustment': int(round(b0 - earlier_base)),
         'model_type': model_type,
         'formula_str': formula_str
     }
