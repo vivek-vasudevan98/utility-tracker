@@ -138,10 +138,12 @@
             </div>
 
             <div class="telemetry-tray">
+                {% if data.days_logged < data.total_days %}
                 <div class="telemetry-row">
                     <span class="telemetry-label">EST. M-END</span>
                     <span class="telemetry-val">{{ "{:,d}".format(data.utilities.electricity.predicted) }} kWh</span>
                 </div>
+                {% endif %}
                 <div class="telemetry-row">
                     <span class="telemetry-label">MoM (vs {{ data.prev_month_label }})</span>
                     {% if data.utilities.electricity.mom %}
@@ -179,10 +181,12 @@
             </div>
 
             <div class="telemetry-tray">
+                {% if data.days_logged < data.total_days %}
                 <div class="telemetry-row">
                     <span class="telemetry-label">EST. M-END</span>
                     <span class="telemetry-val">{{ "{:,d}".format(data.utilities.gas.predicted) }} kWh</span>
                 </div>
+                {% endif %}
                 <div class="telemetry-row">
                     <span class="telemetry-label">MoM (vs {{ data.prev_month_label }})</span>
                     {% if data.utilities.gas.mom %}
@@ -220,10 +224,12 @@
             </div>
 
             <div class="telemetry-tray">
+                {% if data.days_logged < data.total_days %}
                 <div class="telemetry-row">
                     <span class="telemetry-label">EST. M-END</span>
                     <span class="telemetry-val">{{ "{:,d}".format(data.utilities.water.predicted) }} m<sup>3</sup></span>
                 </div>
+                {% endif %}
                 <div class="telemetry-row">
                     <span class="telemetry-label">MoM (vs {{ data.prev_month_label }})</span>
                     {% if data.utilities.water.mom %}
