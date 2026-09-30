@@ -13,19 +13,19 @@ def get_days_in_month(year: int, month: int) -> int:
 def sync_completed_month_bill(month_str: str):
     """
     Event-driven rollup:
-    Checks if all calendar days of `month_str` (YYYY-MM) are logged in `utility_entry`.
-    If complete, aggregates the monthly sum and commits/updates `monthly_utility_bill`.
+    Checks if every calendar day of `month_str` (YYYY-MM) has a known usage figure,
+    i.e. a reading preceded by one from the day before (including the last day of
+    the prior month for day 1). If so, aggregates the monthly sum and
+    commits/updates `monthly_utility_bill`; otherwise the bill is left untouched.
     """
     year, month = map(int, month_str.split('-'))
     total_days = get_days_in_month(year, month)
-    
-    # Query distinct dates logged in that month
-    entries = UtilityEntry.query.filter(UtilityEntry.date.startswith(month_str)).all()
-    unique_dates = {e.date for e in entries}
-    
-    if len(unique_dates) >= total_days:
+
+    records = get_month_records_with_baseline(month_str)
+    days_with_usage = sum(1 for r in records if r['diff_elec'] is not None)
+
+    if days_with_usage >= total_days:
         # Month is 100% complete: calculate actual aggregate consumption
-        records = get_month_records_with_baseline(month_str)
         total_elec = sum(r['diff_elec'] for r in records if r['diff_elec'] is not None)
         total_gas = sum(r['diff_gas'] for r in records if r['diff_gas'] is not None)
         total_water = sum(r['diff_water'] for r in records if r['diff_water'] is not None)
@@ -103,8 +103,9 @@ def get_dashboard_metrics(target_month: str) -> dict:
     
     # 1. Pull current month's daily records for MTD
     records = get_month_records_with_baseline(target_month)
-    days_logged = len(records)
-    
+    # Only days with a known usage figure count (a reading after a gap has none)
+    days_logged = sum(1 for r in records if r['diff_elec'] is not None)
+
     mtd_elec = sum(r['diff_elec'] for r in records if r['diff_elec'] is not None)
     mtd_gas = sum(r['diff_gas'] for r in records if r['diff_gas'] is not None)
     mtd_water = sum(r['diff_water'] for r in records if r['diff_water'] is not None)

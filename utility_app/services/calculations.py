@@ -1,5 +1,10 @@
 import math
+from datetime import date
 from utility_app.models import UtilityEntry
+
+def is_next_day(previous_date: str, current_date: str) -> bool:
+    """True when current_date ('YYYY-MM-DD') is exactly one day after previous_date."""
+    return (date.fromisoformat(current_date) - date.fromisoformat(previous_date)).days == 1
 
 def calculate_deltas(entries):
     """
@@ -8,13 +13,16 @@ def calculate_deltas(entries):
       - Electricity (kWh): math.ceil((Day_i - Day_{i-1}) * 10)
       - Gas (kWh): math.ceil(((Day_i - Day_{i-1}) * 40 * 1.03434) / 3.6)
       - Water (m³): math.ceil(Day_i - Day_{i-1})
+    A delta is only a day's usage when the previous reading is from the day
+    before. After a gap, the reading starts a new baseline (deltas are None),
+    since the usage can't be attributed to individual days.
     """
     processed = []
-    
+
     for i in range(len(entries)):
         current = entries[i]
-        
-        if i == 0:
+
+        if i == 0 or not is_next_day(entries[i - 1].date, current.date):
             diff_elec, diff_gas, diff_water = None, None, None
         else:
             previous = entries[i - 1]
