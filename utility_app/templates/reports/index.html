@@ -113,6 +113,9 @@
             <tr>
                 <td><strong>{{ entry.date }}</strong></td>
                 <td>
+                    {% if entry.electricity is none %}
+                        <span class="text-baseline">— not read</span>
+                    {% else %}
                     {{ "{:,d}".format(entry.electricity) }}
                     <br>
                     {% if entry.diff_elec is not none %}
@@ -120,8 +123,12 @@
                     {% else %}
                         <span class="text-baseline">(Baseline Register)</span>
                     {% endif %}
+                    {% endif %}
                 </td>
                 <td>
+                    {% if entry.gas is none %}
+                        <span class="text-baseline">— not read</span>
+                    {% else %}
                     {{ "{:,d}".format(entry.gas) }}
                     <br>
                     {% if entry.diff_gas is not none %}
@@ -129,14 +136,19 @@
                     {% else %}
                         <span class="text-baseline">(Baseline Register)</span>
                     {% endif %}
+                    {% endif %}
                 </td>
                 <td>
+                    {% if entry.water is none %}
+                        <span class="text-baseline">— not read</span>
+                    {% else %}
                     {{ "{:,d}".format(entry.water) }}
                     <br>
                     {% if entry.diff_water is not none %}
                         <span class="text-usage">{{ "{:,d}".format(entry.diff_water) }} m<sup>3</sup></span>
                     {% else %}
                         <span class="text-baseline">(Baseline Register)</span>
+                    {% endif %}
                     {% endif %}
                 </td>
             </tr>

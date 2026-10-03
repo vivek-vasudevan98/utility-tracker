@@ -3,7 +3,7 @@ import calendar
 from datetime import date, timedelta
 from utility_app import db
 from utility_app.models import MonthlyUtilityBill
-from utility_app.services.calculations import get_month_records_with_baseline, get_daily_usage
+from utility_app.services.calculations import get_month_records_with_baseline, get_daily_usage, get_month_usage
 from utility_app.services.weather_service import get_weather_range
 from utility_app.services.regression import (
     build_weather_normalized_model, BASELINE_MONTHS, RECENT_MONTHS,
@@ -31,7 +31,7 @@ def build_weather_baseline(diff_key: str, weather_key: str, utility: str,
     recent_start = shift_months(month_start, -RECENT_MONTHS)
     train_end = month_start - timedelta(days=1)
 
-    training_records = get_daily_usage(long_start, train_end)
+    training_records = [r for r in get_daily_usage(long_start, train_end) if r[diff_key] is not None]
     result = {
         'model': None,
         'expected': [None] * month_end.day,
@@ -75,45 +75,31 @@ def build_weather_baseline(diff_key: str, weather_key: str, utility: str,
 def sync_completed_month_bill(month_str: str):
     """
     Event-driven rollup:
-    Checks if every calendar day of `month_str` (YYYY-MM) has a known usage figure,
-    i.e. a reading preceded by one from the day before (including the last day of
-    the prior month for day 1). If so, aggregates the monthly sum and
-    commits/updates `monthly_utility_bill`; otherwise the bill is left untouched.
+    Creates the `monthly_utility_bill` row for `month_str` (YYYY-MM) from the
+    readings once every meter's usage is known for the whole month, pro-rating
+    across gaps. A month that already has a bill is never overwritten, so real
+    statement figures are preserved.
     """
+    if MonthlyUtilityBill.query.filter_by(month=month_str).first():
+        return
+
     year, month = map(int, month_str.split('-'))
     total_days = get_days_in_month(year, month)
+    month_start, month_end = date(year, month, 1), date(year, month, total_days)
 
-    records = get_month_records_with_baseline(month_str)
-    days_with_usage = sum(1 for r in records if r['diff_elec'] is not None)
+    usage = {m: get_month_usage(m, month_start, month_end) for m in ('electricity', 'gas', 'water')}
+    if not all(u['complete'] for u in usage.values()):
+        return
 
-    if days_with_usage >= total_days:
-        # Month is 100% complete: calculate actual aggregate consumption
-        total_elec = sum(r['diff_elec'] for r in records if r['diff_elec'] is not None)
-        total_gas = sum(r['diff_gas'] for r in records if r['diff_gas'] is not None)
-        total_water = sum(r['diff_water'] for r in records if r['diff_water'] is not None)
-        
-        start_date = f"{month_str}-01"
-        end_date = f"{month_str}-{str(total_days).zfill(2)}"
-        
-        bill = MonthlyUtilityBill.query.filter_by(month=month_str).first()
-        if not bill:
-            bill = MonthlyUtilityBill(
-                month=month_str,
-                start_date=start_date,
-                end_date=end_date,
-                electricity_kwh=total_elec,
-                gas_kwh=total_gas,
-                water_m3=total_water
-            )
-            db.session.add(bill)
-        else:
-            bill.start_date = start_date
-            bill.end_date = end_date
-            bill.electricity_kwh = total_elec
-            bill.gas_kwh = total_gas
-            bill.water_m3 = total_water
-            
-        db.session.commit()
+    db.session.add(MonthlyUtilityBill(
+        month=month_str,
+        start_date=month_start.isoformat(),
+        end_date=month_end.isoformat(),
+        electricity_kwh=usage['electricity']['total'],
+        gas_kwh=usage['gas']['total'],
+        water_m3=usage['water']['total']
+    ))
+    db.session.commit()
 
 def compute_variance(predicted: int, baseline: int | None) -> dict | None:
     """
@@ -163,23 +149,23 @@ def get_dashboard_metrics(target_month: str) -> dict:
     year, month = map(int, target_month.split('-'))
     total_days = get_days_in_month(year, month)
     
-    # 1. Pull current month's daily records for MTD
-    records = get_month_records_with_baseline(target_month)
-    # Only days with a known usage figure count (a reading after a gap has none)
-    days_logged = sum(1 for r in records if r['diff_elec'] is not None)
+    # 1. Month-to-date usage per meter, pro-rated across gaps in the readings
+    usage = {
+        m: get_month_usage(m, date(year, month, 1), date(year, month, total_days))
+        for m in ('electricity', 'gas', 'water')
+    }
+    mtd = {m: u['total'] or 0 for m, u in usage.items()}
 
-    mtd_elec = sum(r['diff_elec'] for r in records if r['diff_elec'] is not None)
-    mtd_gas = sum(r['diff_gas'] for r in records if r['diff_gas'] is not None)
-    mtd_water = sum(r['diff_water'] for r in records if r['diff_water'] is not None)
-    
-    # 2. Linear projection for the rest of the month
-    if days_logged > 0:
-        scale = total_days / days_logged
-        pred_elec = math.ceil(mtd_elec * scale)
-        pred_gas = math.ceil(mtd_gas * scale)
-        pred_water = math.ceil(mtd_water * scale)
-    else:
-        pred_elec, pred_gas, pred_water = 0, 0, 0
+    # 2. Linear projection for the rest of the month from the days covered
+    predicted = {}
+    for m, u in usage.items():
+        if u['complete'] or not u['covered_days']:
+            predicted[m] = mtd[m]
+        else:
+            predicted[m] = math.ceil(mtd[m] * total_days / u['covered_days'])
+    days_logged = min(total_days, max(u['covered_days'] for u in usage.values()))
+    mtd_elec, mtd_gas, mtd_water = mtd['electricity'], mtd['gas'], mtd['water']
+    pred_elec, pred_gas, pred_water = predicted['electricity'], predicted['gas'], predicted['water']
         
     # 3. Benchmark Keys: Prior Month (MoM) & Prior Year Same Month (YoY)
     prev_month_str = f"{year - 1}-12" if month == 1 else f"{year}-{str(month - 1).zfill(2)}"
@@ -193,7 +179,7 @@ def get_dashboard_metrics(target_month: str) -> dict:
         'month': target_month,
         'days_logged': days_logged,
         'total_days': total_days,
-        'is_complete': days_logged >= total_days,
+        'is_complete': all(u['complete'] for u in usage.values()),
         'prev_month_label': prev_month_str,
         'prev_year_label': prev_year_str,
         'utilities': {
