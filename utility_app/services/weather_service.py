@@ -63,6 +63,9 @@ def fetch_and_cache_weather(start_date: str, end_date: str):
         return True
 
     except Exception as e:
+        # Undo any half-saved rows, or the session refuses every later query
+        # in this request (PendingRollbackError) and the page crashes
+        db.session.rollback()
         print(f"Weather API Fetch Error ({start_date} to {end_date}): {e}")
         return False
 

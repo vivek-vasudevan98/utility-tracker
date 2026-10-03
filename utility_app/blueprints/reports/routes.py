@@ -1,4 +1,5 @@
-from flask import Blueprint, render_template, request
+from flask import Blueprint, render_template, request, flash
+from utility_app.services.months import normalize_month
 from utility_app.models import MonthlyUtilityBill, UtilityEntry
 from utility_app.services.calculations import get_month_records
 
@@ -7,7 +8,11 @@ reports_bp = Blueprint('reports', __name__)
 @reports_bp.route('/')
 def index():
     view_type = request.args.get('view', 'monthly')  # 'monthly' or 'daily'
-    selected_month = request.args.get('month', '')
+    raw_month = request.args.get('month', '')
+    selected_month = normalize_month(raw_month) if raw_month else ''
+    if selected_month is None:
+        flash(f"'{raw_month}' isn't a valid month.", "danger")
+        selected_month = ''
     selected_year = request.args.get('year', '')
 
     daily_records = []

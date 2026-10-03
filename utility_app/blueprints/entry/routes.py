@@ -1,9 +1,11 @@
 from datetime import date as date_cls, timedelta
 from flask import Blueprint, render_template, request, redirect, url_for, flash
+from sqlalchemy.exc import SQLAlchemyError
 from utility_app import db
 from utility_app.services.calculations import METERS
 from utility_app.services.excel_handler import process_excel_upload
 from utility_app.services.readings import save_reading
+from utility_app.services.months import normalize_month
 from utility_app.services.analytics import sync_completed_month_bill
 
 entry_bp = Blueprint('entry', __name__)
@@ -16,17 +18,31 @@ def sync_bills_around(month_str: str):
     month_start = date_cls.fromisoformat(f"{month_str}-01")
     previous_month = (month_start - timedelta(days=1)).strftime('%Y-%m')
     for month in (previous_month, month_str):
-        sync_completed_month_bill(month)
+        try:
+            sync_completed_month_bill(month)
+        except SQLAlchemyError:
+            db.session.rollback()
+            flash(f"Readings saved, but the {month} bill couldn't be updated (database busy). "
+                  "It will be filled in next time a reading for that month is saved.", "info")
 
 @entry_bp.route('/')
 def index():
-    selected_month = request.args.get('month', '')
+    raw = request.args.get('month', '')
+    selected_month = normalize_month(raw) if raw else ''
+    if selected_month is None:
+        flash(f"'{raw}' isn't a valid month.", "danger")
+        return redirect(url_for('entry.index'))
     return render_template('entry/index.html', selected_month=selected_month)
 
 @entry_bp.route('/add', methods=['POST'])
 def add():
-    date = request.form.get('date')
-    month_prefix = date[:7] if date else ""
+    date = (request.form.get('date') or '').strip()
+    try:
+        date_cls.fromisoformat(date)
+    except ValueError:
+        flash("Enter a valid reading date.", "danger")
+        return redirect(url_for('entry.index'))
+    month_prefix = date[:7]
 
     values = {}
     for meter in METERS:
@@ -37,12 +53,18 @@ def add():
             flash(f"{meter.capitalize()} reading '{raw}' is not a number.", "danger")
             return redirect(url_for('entry.index', month=month_prefix))
 
-    if not date or all(v is None for v in values.values()):
-        flash("Enter a date and at least one meter reading.", "danger")
+    if all(v is None for v in values.values()):
+        flash("Enter at least one meter reading.", "danger")
         return redirect(url_for('entry.index', month=month_prefix))
 
-    status, rejections = save_reading(date, values)
-    db.session.commit()
+    try:
+        status, rejections = save_reading(date, values)
+        db.session.commit()
+    except SQLAlchemyError:
+        db.session.rollback()
+        flash("Couldn't save the reading: the database is busy (OneDrive syncing or another "
+              "save in progress). Nothing was changed; please try again.", "danger")
+        return redirect(url_for('entry.index', month=month_prefix))
 
     for reason in rejections:
         flash(f"Rejected {reason}", "danger")
@@ -60,7 +82,11 @@ def add():
 
 @entry_bp.route('/upload', methods=['POST'])
 def upload():
-    selected_month = request.form.get('selected_month', '')
+    raw = request.form.get('selected_month', '')
+    selected_month = normalize_month(raw)
+    if selected_month is None:
+        flash("Select a valid target month before uploading.", "danger")
+        return redirect(url_for('entry.index'))
     if 'excel_file' not in request.files:
         flash("No file selected.", "danger")
         return redirect(url_for('entry.index', month=selected_month))
@@ -74,7 +100,7 @@ def upload():
     flash(msg, category)
     
     # Fill in bills for months the new readings completed
-    if selected_month and category != 'danger':
+    if category != 'danger':
         sync_bills_around(selected_month)
         
     return redirect(url_for('entry.index', month=selected_month))
