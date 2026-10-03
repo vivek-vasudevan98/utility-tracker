@@ -10,6 +10,8 @@ from utility_app.services.analytics import sync_completed_month_bill
 
 entry_bp = Blueprint('entry', __name__)
 
+ALLOWED_UPLOAD_EXTENSIONS = ('.xlsx', '.xls')
+
 def sync_bills_around(month_str: str):
     """
     A new reading can complete its own month or, by closing a gap at the
@@ -94,6 +96,9 @@ def upload():
     file = request.files['excel_file']
     if file.filename == '':
         flash("No file selected.", "danger")
+        return redirect(url_for('entry.index', month=selected_month))
+    if not file.filename.lower().endswith(ALLOWED_UPLOAD_EXTENSIONS):
+        flash("Upload an Excel file (.xlsx or .xls).", "danger")
         return redirect(url_for('entry.index', month=selected_month))
 
     category, msg = process_excel_upload(file, target_month=selected_month)

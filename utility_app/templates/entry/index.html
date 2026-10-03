@@ -23,6 +23,7 @@
         </div>
 
         <form action="{{ url_for('entry.add') }}" method="POST" class="form-grid">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <div class="form-group col-full">
                 <label for="date">Reading Date:</label>
                 <input type="date" id="date" name="date" required {% if not selected_month %}disabled{% endif %}>
@@ -66,12 +67,13 @@
             </div>
 
             <form action="{{ url_for('entry.upload') }}" method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="selected_month" value="{{ selected_month }}">
                 
                 <div class="form-group" style="margin-bottom: 1.25rem;">
                     <label for="excel_file">Select Spreadsheet (.xlsx, .xls):</label>
                     <input type="file" id="excel_file" name="excel_file" accept=".xlsx, .xls" required {% if not selected_month %}disabled{% endif %}>
-                    <span class="input-hint">Expected columns: <code>date</code>, <code>electricity</code>, <code>gas</code>, <code>water</code>. Blank cells are allowed.</span>
+                    <span class="input-hint">Expected columns: <code>date</code>, <code>electricity</code>, <code>gas</code>, <code>water</code>. Blank cells are allowed. Max 5 MB.</span>
                 </div>
 
                 <button type="submit" class="btn btn-secondary" style="width: 100%;" {% if not selected_month %}disabled style="opacity: 0.5; cursor: not-allowed;"{% endif %}>

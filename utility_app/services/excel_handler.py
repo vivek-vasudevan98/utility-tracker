@@ -1,4 +1,5 @@
 import pandas as pd
+from flask import current_app
 from utility_app import db
 from utility_app.services.calculations import METERS
 from utility_app.services.readings import save_reading
@@ -70,6 +71,9 @@ def process_excel_upload(file_storage, target_month=None):
             message += f" Rejected {len(rejections)} reading(s): {listed}" + (f"; and {more} more." if more > 0 else ".")
         return ('info' if rejections else 'success'), message
 
-    except Exception as e:
+    except Exception:
         db.session.rollback()
-        return 'danger', f"Import failed: {str(e)}"
+        # Full details go to the server log; the page gets a plain explanation
+        current_app.logger.exception("Excel import failed")
+        return 'danger', ("Import failed: the file couldn't be read as an Excel sheet with "
+                          "date / electricity / gas / water columns. Nothing was imported.")
