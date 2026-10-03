@@ -1,5 +1,6 @@
 import urllib.request
 import json
+import time
 from datetime import date, timedelta
 from utility_app import db
 from utility_app.models import DailyWeatherCache
@@ -11,6 +12,15 @@ LONGITUDE = -1.6178
 # The Open-Meteo archive only holds data up to roughly this many days ago.
 # Requesting any later date makes the whole request fail.
 ARCHIVE_LAG_DAYS = 5
+
+# Seconds to wait for Open-Meteo before giving up
+FETCH_TIMEOUT_SECONDS = 8
+# After trying to download a stretch of missing days (successfully or not),
+# don't try the same stretch again for this long, so pages load from the
+# cache instead of waiting on a download that keeps failing
+RETRY_COOLDOWN_SECONDS = 30 * 60
+# (first missing day, last missing day) -> time of the last download attempt
+_last_attempt = {}
 
 def fetch_and_cache_weather(start_date: str, end_date: str):
     """
@@ -28,7 +38,7 @@ def fetch_and_cache_weather(start_date: str, end_date: str):
     
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'CommercialUtilityTracker/1.0'})
-        with urllib.request.urlopen(req, timeout=8) as response:
+        with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT_SECONDS) as response:
             payload = json.loads(response.read().decode('utf-8'))
             
         if 'daily' not in payload or 'time' not in payload['daily']:
@@ -36,6 +46,12 @@ def fetch_and_cache_weather(start_date: str, end_date: str):
 
         dates = payload['daily']['time']
         temps = payload['daily']['temperature_2m_mean']
+        existing = {
+            row.date: row for row in DailyWeatherCache.query.filter(
+                DailyWeatherCache.date >= start_date,
+                DailyWeatherCache.date <= end_date
+            )
+        }
 
         for d_str, temp in zip(dates, temps):
             if temp is None:
@@ -45,7 +61,7 @@ def fetch_and_cache_weather(start_date: str, end_date: str):
             hdd = max(0.0, round(16.0 - float(temp), 2))
             cdd = max(0.0, round(float(temp) - 20.0, 2))
 
-            cached = DailyWeatherCache.query.filter_by(date=d_str).first()
+            cached = existing.get(d_str)
             if not cached:
                 cached = DailyWeatherCache(
                     date=d_str,
@@ -72,7 +88,8 @@ def fetch_and_cache_weather(start_date: str, end_date: str):
 def get_weather_range(start: date, end: date) -> dict:
     """
     Returns a dictionary of date -> {temp_mean, hdd_16, cdd_20} for start..end (inclusive).
-    If dates are missing in SQLite cache, queries Open-Meteo once for the whole range.
+    Days missing from the SQLite cache are downloaded from Open-Meteo in one
+    request covering just the missing stretch, at most once per RETRY_COOLDOWN_SECONDS.
     """
     # Cap the range at the latest day the archive can serve, so recent
     # periods still get weather for the days that are available.
@@ -85,21 +102,29 @@ def get_weather_range(start: date, end: date) -> dict:
 
     start_date = start.isoformat()
     end_date = range_end.isoformat()
-    expected_days = (range_end - start).days + 1
 
-    # Check local SQLite cache first
-    cached_rows = DailyWeatherCache.query.filter(
-        DailyWeatherCache.date >= start_date,
-        DailyWeatherCache.date <= end_date
-    ).all()
-
-    # If cache is incomplete, fetch and reload
-    if len(cached_rows) < expected_days:
-        fetch_and_cache_weather(start_date, end_date)
-        cached_rows = DailyWeatherCache.query.filter(
+    def load_cached():
+        return DailyWeatherCache.query.filter(
             DailyWeatherCache.date >= start_date,
             DailyWeatherCache.date <= end_date
         ).all()
+
+    # Check local SQLite cache first
+    cached_rows = load_cached()
+    cached_dates = {r.date for r in cached_rows}
+    missing = [
+        day for day in (start + timedelta(days=i) for i in range((range_end - start).days + 1))
+        if day.isoformat() not in cached_dates
+    ]
+
+    # Download only the stretch of missing days, at most once per cooldown
+    if missing:
+        stretch = (missing[0].isoformat(), missing[-1].isoformat())
+        last = _last_attempt.get(stretch)
+        if last is None or time.monotonic() - last >= RETRY_COOLDOWN_SECONDS:
+            _last_attempt[stretch] = time.monotonic()
+            if fetch_and_cache_weather(*stretch):
+                cached_rows = load_cached()
 
     return {
         r.date: {
