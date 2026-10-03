@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request
 from utility_app.models import MonthlyUtilityBill, UtilityEntry
-from utility_app.services.calculations import get_month_records_with_baseline
+from utility_app.services.calculations import get_month_records
 
 reports_bp = Blueprint('reports', __name__)
 
@@ -18,7 +18,7 @@ def index():
         daily_count = UtilityEntry.query.filter(UtilityEntry.date.startswith(selected_month)).count()
         has_daily_data = daily_count > 0
         if has_daily_data:
-            daily_records = get_month_records_with_baseline(selected_month)
+            daily_records = get_month_records(selected_month)
             daily_records.reverse()
         else:
             # If no daily register exists, force monthly statement view

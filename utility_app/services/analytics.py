@@ -3,7 +3,7 @@ import calendar
 from datetime import date, timedelta
 from utility_app import db
 from utility_app.models import MonthlyUtilityBill
-from utility_app.services.calculations import get_month_records_with_baseline, get_daily_usage, get_month_usage
+from utility_app.services.calculations import get_month_records, get_daily_usage, get_month_usage
 from utility_app.services.weather_service import get_weather_range
 from utility_app.services.regression import (
     build_weather_normalized_model, BASELINE_MONTHS, RECENT_MONTHS,
@@ -24,7 +24,7 @@ def build_weather_baseline(diff_key: str, weather_key: str, utility: str,
     """
     Trains the two-layer weather model on readings from before the target month
     (never the month itself) and projects the expected daily series for it.
-    Each day's usage is paired with the previous day's weather (WEATHER_LAG_DAYS).
+    Each day's usage is paired with that day's weather (shifted by WEATHER_LAG_DAYS).
     """
     lag = timedelta(days=WEATHER_LAG_DAYS)
     long_start = shift_months(month_start, -BASELINE_MONTHS)
@@ -226,17 +226,17 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
     total_days = get_days_in_month(year, month)
     
     # 1. Target Month Daily Series
-    cur_records = get_month_records_with_baseline(target_month)
+    cur_records = get_month_records(target_month)
     cur_map = {int(r['date'].split('-')[2]): r[diff_key] for r in cur_records if r[diff_key] is not None}
     
     # 2. Prior Month Keys
     prev_m_str = f"{year - 1}-12" if month == 1 else f"{year}-{str(month - 1).zfill(2)}"
-    prev_m_records = get_month_records_with_baseline(prev_m_str)
+    prev_m_records = get_month_records(prev_m_str)
     prev_m_map = {int(r['date'].split('-')[2]): r[diff_key] for r in prev_m_records if r[diff_key] is not None}
     
     # 3. Prior Year Keys
     prev_y_str = f"{year - 1}-{str(month).zfill(2)}"
-    prev_y_records = get_month_records_with_baseline(prev_y_str)
+    prev_y_records = get_month_records(prev_y_str)
     prev_y_map = {int(r['date'].split('-')[2]): r[diff_key] for r in prev_y_records if r[diff_key] is not None}
     
     # Check for macro statement fallback

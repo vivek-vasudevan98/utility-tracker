@@ -121,7 +121,7 @@
                     {% if entry.diff_elec is not none %}
                         <span class="text-usage">{{ "{:,d}".format(entry.diff_elec) }} kWh</span>
                     {% else %}
-                        <span class="text-baseline">(Baseline Register)</span>
+                        <span class="text-baseline">(no next-day reading)</span>
                     {% endif %}
                     {% endif %}
                 </td>
@@ -134,7 +134,7 @@
                     {% if entry.diff_gas is not none %}
                         <span class="text-usage">{{ "{:,d}".format(entry.diff_gas) }} kWh</span>
                     {% else %}
-                        <span class="text-baseline">(Baseline Register)</span>
+                        <span class="text-baseline">(no next-day reading)</span>
                     {% endif %}
                     {% endif %}
                 </td>
@@ -147,7 +147,7 @@
                     {% if entry.diff_water is not none %}
                         <span class="text-usage">{{ "{:,d}".format(entry.diff_water) }} m<sup>3</sup></span>
                     {% else %}
-                        <span class="text-baseline">(Baseline Register)</span>
+                        <span class="text-baseline">(no next-day reading)</span>
                     {% endif %}
                     {% endif %}
                 </td>

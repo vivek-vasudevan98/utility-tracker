@@ -10,8 +10,9 @@ RECENT_MONTHS = 3
 MIN_TRAINING_DAYS = 90
 # Recent days needed before layer 2 fully replaces the long-term base load
 RECENT_FULL_WEIGHT_DAYS = 30
-# Readings are taken each morning, so a reading on day D mostly reflects day D-1
-WEATHER_LAG_DAYS = 1
+# Days between the weather and the usage it drives. Usage is dated by the day the
+# energy was used (not the morning it was read), so it pairs with same-day weather
+WEATHER_LAG_DAYS = 0
 
 # Below this R^2, consumption barely tracks degree days; flagged, not refitted
 WEAK_FIT_R2 = 0.15
@@ -91,7 +92,7 @@ def build_weather_normalized_model(
         slope, with a constrained least-squares fallback.
       Layer 2 (recent_x/recent_y, last RECENT_MONTHS): keeps the slope fixed and
         recalibrates the base load, blended in until RECENT_FULL_WEIGHT_DAYS.
-    x values: previous-day Degree Days (HDD for Gas, CDD for Electricity)
+    x values: Degree Days (HDD for Gas, CDD for Electricity), lagged by WEATHER_LAG_DAYS
     y values: Actual Daily Consumption (kWh)
     Returns None when layer 1 has fewer than MIN_TRAINING_DAYS points.
     """
@@ -125,7 +126,7 @@ def build_weather_normalized_model(
     rmse = compute_rmse(eval_y, [b0 + b1 * x for x in eval_x])
 
     dd_var = "HDD₁₆" if utility_type == 'gas' else "CDD₂₀"
-    formula_str = f"Ŷ = {int(math.ceil(b0)):,d} + ({round(b1, 2)} × {dd_var} of previous day)"
+    formula_str = f"Ŷ = {int(math.ceil(b0)):,d} + ({round(b1, 2)} × {dd_var})"
 
     return {
         'beta_0': b0,
