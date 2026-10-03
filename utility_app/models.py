@@ -2,10 +2,10 @@ from utility_app import db
 
 class UtilityEntry(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    date = db.Column(db.String(50), nullable=False)   # Format: "YYYY-MM-DD"
-    electricity = db.Column(db.Float, nullable=False) # Raw cumulative register
-    gas = db.Column(db.Float, nullable=False)         # Raw cumulative m³
-    water = db.Column(db.Float, nullable=False)       # Raw cumulative m³
+    date = db.Column(db.String(50), nullable=False, unique=True)   # Format: "YYYY-MM-DD"
+    electricity = db.Column(db.Float, nullable=True) # Raw cumulative register
+    gas = db.Column(db.Float, nullable=True)         # Raw cumulative m³
+    water = db.Column(db.Float, nullable=True)       # Raw cumulative m³
 
     def __repr__(self):
         return f"<UtilityEntry {self.date}>"

@@ -25,10 +25,21 @@ def process_excel_upload(file_storage, target_month=None):
             if target_month and not parsed_date.startswith(target_month):
                 continue
                 
-            elec = float(row['electricity'])
-            gas = float(row['gas'])
-            water = float(row['water'])
-            
+            try:
+                elec = float(row['electricity'])
+            except (ValueError, TypeError):
+                elec = None
+
+            try:
+                gas = float(row['gas'])
+            except (ValueError, TypeError):
+                gas = None
+
+            try:
+                water = float(row['water'])
+            except (ValueError, TypeError):
+                water = None
+
             existing = UtilityEntry.query.filter_by(date=parsed_date).first()
             if existing:
                 existing.electricity = elec

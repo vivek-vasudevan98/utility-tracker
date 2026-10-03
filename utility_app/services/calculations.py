@@ -22,7 +22,7 @@ def calculate_deltas(entries):
     for i in range(len(entries)):
         current = entries[i]
 
-        if i == 0 or not is_next_day(entries[i - 1].date, current.date):
+        if any(j is None for j in [current.electricity, current.gas, current.water]) or i == 0 or not is_next_day(entries[i - 1].date, current.date):
             diff_elec, diff_gas, diff_water = None, None, None
         else:
             previous = entries[i - 1]
