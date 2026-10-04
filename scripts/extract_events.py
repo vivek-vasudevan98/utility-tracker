@@ -28,6 +28,8 @@ ROOMS = [
     "Hillgate/Oakwellgate Suite",
     "Pipewellgate/Oakwellgate Suite"
 ]
+# Event types (the report's "Event Name" column) to leave out.
+EXCLUDED_TYPES = ["Teardown"]
 
 # Report column -> output column. Either "Date" or "Event Start Date" is
 # accepted for the date column.
@@ -55,6 +57,7 @@ def _room_key(value):
 
 
 ROOM_KEYS = {_room_key(r) for r in ROOMS}
+EXCLUDED_TYPE_KEYS = {_norm(t) for t in EXCLUDED_TYPES}
 
 
 def find_header_row(raw):
@@ -101,6 +104,7 @@ def extract(table):
             lambda v: pd.notna(v) and _room_key(v) in ROOM_KEYS
         )
         & table["Expected"].map(has_expected)
+        & ~table["Event Name"].map(lambda v: _norm(v) in EXCLUDED_TYPE_KEYS)
     )
     out = table.loc[mask, ["Date", *COLUMN_MAP]].rename(columns=COLUMN_MAP)
     for col in COLUMN_MAP.values():
