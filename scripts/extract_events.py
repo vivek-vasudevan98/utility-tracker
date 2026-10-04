@@ -20,10 +20,13 @@ from openpyxl.utils import get_column_letter
 STATUS = "Definite"
 ROOMS = [
     "Gateshead Suite",
+    "Gateshead Suite Foyer",
     "Hillgate Suite",
     "Oakwellgate Suite",
     "Pipewellgate Suite",
     "Oakwellgate/Pipewellgate Suite",
+    "Hillgate/Oakwellgate Suite",
+    "Pipewellgate/Oakwellgate Suite"
 ]
 
 # Report column -> output column. Either "Date" or "Event Start Date" is
