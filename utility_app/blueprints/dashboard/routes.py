@@ -1,7 +1,9 @@
 from flask import Blueprint, render_template, request, abort, flash, redirect, url_for
 from datetime import date, datetime, timedelta
+from sqlalchemy.exc import SQLAlchemyError
+from utility_app import db
 from utility_app.services.analytics import get_dashboard_metrics, get_utility_daily_comparison
-from utility_app.models import UtilityEntry
+from utility_app.models import UtilityEntry, ConfirmedRise
 from utility_app.services.months import normalize_month
 
 dashboard_bp = Blueprint('dashboard', __name__)
@@ -36,10 +38,11 @@ def index():
     dashboard_data = get_dashboard_metrics(selected_month)
     return render_template('dashboard/index.html', data=dashboard_data, selected_month=selected_month)
 
+VALID_UTILITIES = ('electricity', 'gas', 'water')
+
 @dashboard_bp.route('/analytics/<utility>')
 def analytics(utility):
-    valid_utilities = ['electricity', 'gas', 'water']
-    if utility not in valid_utilities:
+    if utility not in VALID_UTILITIES:
         abort(404)
 
     selected_month = requested_month()
@@ -50,3 +53,30 @@ def analytics(utility):
     telemetry = get_utility_daily_comparison(utility, selected_month)
     return render_template('dashboard/analytics.html', data=telemetry, selected_month=selected_month)
 
+@dashboard_bp.route('/analytics/<utility>/rise', methods=['POST'])
+def rise(utility):
+    """Confirms a sudden rise as the new normal (action=confirm), or takes that back (action=undo)."""
+    if utility not in VALID_UTILITIES:
+        abort(404)
+    month = normalize_month(request.form.get('month', '')) or None
+    back = redirect(url_for('dashboard.analytics', utility=utility, month=month))
+    try:
+        start = date.fromisoformat(request.form.get('start_date', '')).isoformat()
+    except ValueError:
+        flash("That rise couldn't be found; nothing was changed.", "danger")
+        return back
+
+    existing = ConfirmedRise.query.filter_by(utility=utility, start_date=start).first()
+    try:
+        if request.form.get('action') == 'confirm' and not existing:
+            db.session.add(ConfirmedRise(utility=utility, start_date=start))
+            db.session.commit()
+            flash(f"Rise from {start} accepted as the new normal; the baseline now follows it.", "success")
+        elif request.form.get('action') == 'undo' and existing:
+            db.session.delete(existing)
+            db.session.commit()
+            flash(f"Rise from {start} is no longer accepted; it is held out of the baseline again.", "info")
+    except SQLAlchemyError:
+        db.session.rollback()
+        flash("Couldn't save that: the database is busy. Nothing was changed; please try again.", "danger")
+    return back

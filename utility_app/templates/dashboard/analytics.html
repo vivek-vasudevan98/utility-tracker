@@ -78,6 +78,68 @@
         color: #0f172a;
         box-shadow: 0 1px 2px rgba(0,0,0,0.08);
     }
+    .model-card {
+        background: #ffffff;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.25rem 1.5rem;
+        margin-bottom: 1.25rem;
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 1.25rem;
+    }
+    .model-card h3 {
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--text-muted);
+        margin: 0 0 0.4rem;
+    }
+    .model-card p, .model-card li {
+        font-size: 0.82rem;
+        color: var(--text-main);
+        margin: 0 0 0.3rem;
+    }
+    .model-card ul {
+        margin: 0;
+        padding-left: 1.1rem;
+    }
+    .model-note {
+        font-size: 0.75rem;
+        color: var(--text-muted);
+    }
+    .status-badge {
+        display: inline-block;
+        font-size: 0.72rem;
+        font-weight: 700;
+        padding: 2px 8px;
+        border-radius: 4px;
+        margin-bottom: 0.4rem;
+    }
+    .status-model { background: #dcfce7; color: #166534; }
+    .status-learning { background: #fef9c3; color: #854d0e; }
+    .status-plain { background: #f1f5f9; color: #475569; }
+    .steps-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.8rem;
+    }
+    .steps-table td {
+        padding: 0.3rem 0.4rem 0.3rem 0;
+        border-bottom: 1px solid #f1f5f9;
+        vertical-align: middle;
+    }
+    .steps-table form { margin: 0; }
+    .mini-btn {
+        font-size: 0.72rem;
+        font-weight: 700;
+        padding: 0.2rem 0.55rem;
+        border-radius: 4px;
+        border: 1px solid #cbd5e1;
+        background: #ffffff;
+        cursor: pointer;
+    }
 </style>
 
 <!-- Top Back & Title Bar -->
@@ -120,19 +182,124 @@
     </div>
 </div>
 
+{% set m = data.model %}
+<!-- Consumption Model Verdict -->
+<div class="model-card">
+    <div>
+        <h3>How days are judged</h3>
+        {% if m.status == 'model' %}
+            <span class="status-badge status-model">Model</span>
+            <p>Expected = recent baseline + effects learned from data {{ m.holdout_months }}–15 months old
+               ({{ m.fit.training_period[0].strftime('%b %Y') }} – {{ m.fit.training_period[1].strftime('%b %Y') }}).</p>
+        {% elif m.status == 'learning' %}
+            <span class="status-badge status-learning">Still learning</span>
+            <p>Expected = recent baseline + weather effects learned from the whole history.
+               The effects from data {{ m.holdout_months }}+ months old take over once they beat a plain 28-day average on the last 90 days.</p>
+        {% elif m.status == 'none' %}
+            <p class="model-note">No readings to judge in this month.</p>
+        {% else %}
+            <span class="status-badge status-plain">Plain average</span>
+            <p>Not enough history to learn effects yet (needs 90 days); expected = the last 28 days' average.</p>
+        {% endif %}
+        {% if m.effects %}
+            <ul>{% for line in m.effects %}<li>{{ line }}</li>{% endfor %}</ul>
+        {% endif %}
+    </div>
+
+    <div>
+        <h3>This month vs expected</h3>
+        {% if m.has_expected %}
+            <p><strong style="font-size: 1.1rem;">{{ "{:+.1%}".format(m.month_change) }}</strong>
+               <span class="model-note">({{ "{:,.0f}".format(m.month_actual) }} actual vs {{ "{:,.0f}".format(m.month_expected) }} {{ data.unit }} expected, on days with both)</span></p>
+            {% if m.flag_band %}
+                <p class="model-note">Days are flagged beyond &plusmn;{{ "{:,.0f}".format(m.flag_band) }} {{ data.unit }}
+                   (twice the typical miss of {{ "{:,.0f}".format(m.typical_miss) }}).</p>
+            {% endif %}
+            {% if m.flagged_days %}
+                <ul>
+                {% for f in m.flagged_days %}
+                    <li>{{ f.date.strftime('%a %d %b') }}: {{ "{:,.0f}".format(f.actual) }} vs {{ "{:,.0f}".format(f.expected) }} expected
+                        ({{ "{:+.0%}".format(f.actual / f.expected - 1) if f.expected > 0 else "n/a" }})</li>
+                {% endfor %}
+                </ul>
+            {% else %}
+                <p class="model-note">No days flagged this month.</p>
+            {% endif %}
+        {% else %}
+            <p class="model-note">No expected values for this month (no readings or no weather yet).</p>
+        {% endif %}
+    </div>
+
+    <div>
+        <h3>Step changes</h3>
+        {% if m.fixes or m.rises or m.confirmed_rises or m.heating_alerts %}
+        <table class="steps-table">
+            {% for f in m.fixes %}
+            <tr>
+                <td><strong>Fix</strong></td>
+                <td>from {{ f.start.strftime('%d %b %Y') }}</td>
+                <td>{{ "{:+.0%}".format(f.change) }}</td>
+                <td class="model-note">baseline restarted</td>
+            </tr>
+            {% endfor %}
+            {% for r in m.rises %}
+            <tr>
+                <td><strong style="color: var(--danger);">Rise</strong></td>
+                <td>from {{ r.start.strftime('%d %b %Y') }}{% if not r.ongoing %} to {{ r.last.strftime('%d %b') }}{% endif %}</td>
+                <td>{{ "{:+.0%}".format(r.change) }}</td>
+                <td>
+                    <form method="POST" action="{{ url_for('dashboard.rise', utility=data.utility) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="month" value="{{ selected_month }}">
+                        <input type="hidden" name="start_date" value="{{ r.start.isoformat() }}">
+                        <button type="submit" name="action" value="confirm" class="mini-btn"
+                                title="Held out of the baseline until accepted">Accept as new normal</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+            {% for start in m.confirmed_rises %}
+            <tr>
+                <td><strong>Rise</strong></td>
+                <td>from {{ start.strftime('%d %b %Y') }}</td>
+                <td></td>
+                <td>
+                    <form method="POST" action="{{ url_for('dashboard.rise', utility=data.utility) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="month" value="{{ selected_month }}">
+                        <input type="hidden" name="start_date" value="{{ start.isoformat() }}">
+                        <span class="model-note">accepted</span>
+                        <button type="submit" name="action" value="undo" class="mini-btn">Undo</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+            {% for h in m.heating_alerts %}
+            <tr>
+                <td><strong style="color: var(--danger);">Heating</strong></td>
+                <td colspan="3">cold days drifting up {{ h.start.strftime('%d %b') }} – {{ h.last.strftime('%d %b %Y') }}; held out of the baseline</td>
+            </tr>
+            {% endfor %}
+        </table>
+        {% else %}
+            <p class="model-note">None found. A fix is 7 reads in a row 15%+ below expected; a rise is 7 reads 15%+ above.</p>
+        {% endif %}
+    </div>
+</div>
+
 <!-- Interactive Chart Card -->
 <div class="chart-container-card">
     <div class="chart-toolbar">
         <div>
             <span style="font-size: 0.85rem; font-weight: 700; color: var(--text-main);">Daily Delta Trajectory</span>
-            <span id="benchmark-caption" style="font-size: 0.75rem; color: var(--text-muted); margin-left: 0.5rem;">
-                Comparing vs {{ data.prev_month_label }} (MoM)
-            </span>
+            <span id="benchmark-caption" style="font-size: 0.75rem; color: var(--text-muted); margin-left: 0.5rem;"></span>
         </div>
 
         <!-- Mode Toggle Switch -->
         <div class="toggle-group">
-            <button type="button" class="toggle-btn active" id="btn-mom" onclick="switchBenchmark('mom')">vs MoM</button>
+            <button type="button" class="toggle-btn" id="btn-expected" onclick="switchBenchmark('expected')"
+                    {% if not m.has_expected %}disabled title="No expected values for this month"{% endif %}>vs Expected</button>
+            <button type="button" class="toggle-btn" id="btn-mom" onclick="switchBenchmark('mom')">vs MoM</button>
             <button type="button" class="toggle-btn" id="btn-yoy" onclick="switchBenchmark('yoy')">vs YoY</button>
         </div>
     </div>
@@ -148,6 +315,8 @@
     const currentSeries = {{ data.chart_data.current | tojson }};
     const momSeries = {{ data.chart_data.mom | tojson }};
     const yoySeries = {{ data.chart_data.yoy | tojson }};
+    const expectedSeries = {{ m.expected | tojson }};
+    const flaggedDays = {{ m.flagged | tojson }};
     
     const primaryColor = "{{ data.color }}";
     const unit = "{{ data.unit }}";
@@ -167,13 +336,15 @@
                     borderWidth: 2.5,
                     fill: true,
                     tension: 0.25,
-                    pointRadius: 3,
-                    pointHoverRadius: 6,
-                    pointBackgroundColor: primaryColor
+                    // Flagged days stand out in red
+                    pointRadius: flaggedDays.map(f => f ? 6 : 3),
+                    pointHoverRadius: 7,
+                    pointBackgroundColor: flaggedDays.map(f => f ? '#dc2626' : primaryColor),
+                    pointBorderColor: flaggedDays.map(f => f ? '#dc2626' : primaryColor)
                 },
                 {
                     label: "Benchmark: {{ data.prev_month_label }}",
-                    data: momSeries,
+                    data: [],
                     borderColor: '#94a3b8',
                     borderWidth: 1.75,
                     borderDash: [5, 4],
@@ -239,11 +410,18 @@
     function switchBenchmark(mode) {
         const btnMom = document.getElementById('btn-mom');
         const btnYoy = document.getElementById('btn-yoy');
+        const btnExpected = document.getElementById('btn-expected');
         const caption = document.getElementById('benchmark-caption');
 
-        [btnMom, btnYoy].forEach(b => b.classList.remove('active'));
+        [btnMom, btnYoy, btnExpected].forEach(b => b.classList.remove('active'));
 
-        if (mode === 'mom') {
+        if (mode === 'expected') {
+            btnExpected.classList.add('active');
+            caption.innerText = "Comparing vs expected (red points: flagged days)";
+            chart.data.datasets[1].label = "Expected";
+            chart.data.datasets[1].data = expectedSeries;
+            chart.data.datasets[1].borderColor = '#8b5cf6';
+        } else if (mode === 'mom') {
             btnMom.classList.add('active');
             caption.innerText = "Comparing vs {{ data.prev_month_label }} (MoM)";
             chart.data.datasets[1].label = "Benchmark: {{ data.prev_month_label }}";
@@ -258,5 +436,7 @@
         }
         chart.update();
     }
+
+    switchBenchmark({{ ('expected' if m.has_expected else 'mom') | tojson }});
 </script>
 {% endblock %}

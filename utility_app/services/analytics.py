@@ -2,8 +2,9 @@ import math
 import calendar
 from datetime import date
 from utility_app import db
-from utility_app.models import MonthlyUtilityBill
+from utility_app.models import MonthlyUtilityBill, ConfirmedRise
 from utility_app.services.calculations import get_month_records, get_month_usage
+from utility_app.services.model import run_model, INPUT_LABELS, FLAG_MULTIPLE, HOLDOUT_MONTHS
 
 def get_days_in_month(year: int, month: int) -> int:
     """Returns the total number of calendar days in a given month."""
@@ -147,6 +148,7 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
       - Current target month
       - Prior month (MoM)
       - Prior year same month (YoY)
+      - The consumption model's expected usage and flagged days
     """
     attr_map = {
         'electricity': ('diff_elec', 'electricity_kwh', 'kWh', '#eab308'),
@@ -220,6 +222,7 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
     return {
         'utility': utility,
         'unit': unit,
+        'model': get_model_view(utility, target_month, unit),
         'color': color,
         'target_month': target_month,
         'prev_month_label': prev_m_str,
@@ -238,4 +241,67 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
             'mom': mom_series,
             'yoy': yoy_series
         }
+    }
+def describe_effects(effects: dict, unit: str) -> list:
+    """Each effect in words, e.g. '-630 kWh on Sun–Wed'."""
+    lines = []
+    for name, coef in (effects or {}).items():
+        amount = f"{coef:+,.1f}" if abs(coef) < 10 else f"{coef:+,.0f}"
+        lines.append(f"{amount} {unit} {INPUT_LABELS[name]}")
+    return lines
+
+def get_model_view(utility: str, target_month: str, unit: str) -> dict:
+    """
+    The consumption model's verdict for the month: expected usage and flags
+    for each day, how the days are being judged, and the step changes found.
+    """
+    model = run_model(utility)
+    year, month = map(int, target_month.split('-'))
+    total_days = get_days_in_month(year, month)
+    month_start = date(year, month, 1)
+
+    expected = [None] * total_days
+    flagged = [False] * total_days
+    actual_sum = expected_sum = 0.0
+    flagged_days = []
+    for d in model.days:
+        if d['date'].strftime('%Y-%m') != target_month or d['expected'] is None:
+            continue
+        i = d['date'].day - 1
+        expected[i] = math.ceil(d['expected'])
+        flagged[i] = d['flagged']
+        actual_sum += d['usage']
+        expected_sum += d['expected']
+        if d['flagged']:
+            flagged_days.append({'date': d['date'], 'actual': d['usage'], 'expected': d['expected']})
+
+    fit = model.fits.get(month_start)
+    if fit is None:
+        status, effects = 'none', None
+    elif fit['mode'] == 'model':
+        status, effects = 'model', fit['effects']
+    elif model.step_effects:
+        status, effects = 'learning', model.step_effects
+    else:
+        status, effects = 'plain', None
+
+    confirmed = ConfirmedRise.query.filter_by(utility=utility).order_by(ConfirmedRise.start_date).all()
+    return {
+        'status': status,
+        'fit': fit,
+        'effects': describe_effects(effects, unit),
+        'expected': expected,
+        'flagged': flagged,
+        'flagged_days': flagged_days,
+        'has_expected': any(v is not None for v in expected),
+        'typical_miss': fit['typical_miss'] if fit else None,
+        'flag_band': fit['typical_miss'] * FLAG_MULTIPLE if fit and fit['typical_miss'] else None,
+        'month_actual': actual_sum,
+        'month_expected': expected_sum,
+        'month_change': actual_sum / expected_sum - 1 if expected_sum else None,
+        'fixes': model.fixes,
+        'rises': model.rises,
+        'confirmed_rises': [date.fromisoformat(r.start_date) for r in confirmed],
+        'heating_alerts': model.heating_alerts,
+        'holdout_months': HOLDOUT_MONTHS,
     }

@@ -146,7 +146,8 @@ class ConsumptionModel:
         self.rises = []
         self.heating_alerts = []
         self.step_effects = None  # effects learned from the whole history, with its step changes
-        self.fit = None           # the latest month's judging effects, mode and typical miss
+        self.fit = None           # the current month's judging effects, mode and typical miss
+        self.fits = {}            # month start -> that month's fit
 
     # ---------- data ----------
 
@@ -393,6 +394,7 @@ class ConsumptionModel:
             'evaluation_reads': len(plain_miss),
             'typical_miss': (rms(model_miss) if use_model else rms(learning_miss)) if enough else None,
         }
+        self.fits[month_start] = self.fit
 
     def judge(self):
         for i, day in enumerate(self.days):
