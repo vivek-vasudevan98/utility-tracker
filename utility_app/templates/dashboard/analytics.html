@@ -37,32 +37,6 @@
         color: var(--text-main);
         letter-spacing: -0.02em;
     }
-    .model-tray {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
-        border-radius: 6px;
-        padding: 0.75rem 1rem;
-        margin-bottom: 1.25rem;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        flex-wrap: wrap;
-        gap: 0.5rem;
-    }
-    .model-pill {
-        display: inline-flex;
-        align-items: center;
-        gap: 0.5rem;
-        font-size: 0.8rem;
-    }
-    .model-badge {
-        background: #ffffff;
-        border: 1px solid #cbd5e1;
-        padding: 2px 7px;
-        border-radius: 4px;
-        font-weight: 700;
-        color: #0f172a;
-    }
     .chart-container-card {
         background: #ffffff;
         border: 1px solid var(--border);
@@ -146,33 +120,6 @@
     </div>
 </div>
 
-<!-- Weather Regression Model Diagnostics Tray (Weather Utilities Only) -->
-{% if data.has_weather_model %}
-<div class="model-tray">
-    <div class="model-pill">
-        <span style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Derived Model:</span>
-        <span class="model-badge" style="font-family: monospace;">{{ data.regression_model.formula_str }}</span>
-        <span style="font-size: 0.75rem; color: #64748b;">({{ data.regression_model.model_type }})</span>
-    </div>
-    <div style="display: flex; gap: 1rem;">
-        <span style="font-size: 0.75rem; color: var(--text-muted);">R² (12-month fit): <strong style="color: #0f172a;">{{ data.regression_model.r_squared }}</strong></span>
-        <span style="font-size: 0.75rem; color: var(--text-muted);">RMSE ({{ data.regression_model.rmse_window }}): <strong style="color: #0f172a;">{{ "{:,d}".format(data.regression_model.rmse | int) }} {{ data.unit }}</strong></span>
-    </div>
-    <div style="flex-basis: 100%; font-size: 0.72rem; color: var(--text-muted);">
-        Trained on {{ data.regression_model.training_days }} days ({{ data.weather_baseline.training_period }});
-        base load recalibrated on {{ data.weather_baseline.recent_period }} ({{ data.regression_model.recent_days }} days):
-        {{ "{:+,d}".format(data.regression_model.base_load_adjustment) }} {{ data.unit }}/day
-    </div>
-</div>
-{% elif data.weather_applicable %}
-<div class="model-tray">
-    <span style="font-size: 0.75rem; color: var(--text-muted);">
-        Weather model unavailable: needs {{ data.weather_baseline.min_training_days }} days of training data
-        ({{ data.weather_baseline.training_period }}), {{ data.weather_baseline.training_days }} available.
-    </span>
-</div>
-{% endif %}
-
 <!-- Interactive Chart Card -->
 <div class="chart-container-card">
     <div class="chart-toolbar">
@@ -187,13 +134,6 @@
         <div class="toggle-group">
             <button type="button" class="toggle-btn active" id="btn-mom" onclick="switchBenchmark('mom')">vs MoM</button>
             <button type="button" class="toggle-btn" id="btn-yoy" onclick="switchBenchmark('yoy')">vs YoY</button>
-            {% if data.has_weather_model %}
-                <button type="button" class="toggle-btn" id="btn-weather" onclick="switchBenchmark('weather')">vs Weather-Expected</button>
-            {% elif data.weather_applicable %}
-                <span title="Needs {{ data.weather_baseline.min_training_days }} days of training data, {{ data.weather_baseline.training_days }} available">
-                    <button type="button" class="toggle-btn" id="btn-weather" disabled>vs Weather-Expected</button>
-                </span>
-            {% endif %}
         </div>
     </div>
 
@@ -208,7 +148,6 @@
     const currentSeries = {{ data.chart_data.current | tojson }};
     const momSeries = {{ data.chart_data.mom | tojson }};
     const yoySeries = {{ data.chart_data.yoy | tojson }};
-    const weatherSeries = {{ data.chart_data.weather_expected | tojson }};
     
     const primaryColor = "{{ data.color }}";
     const unit = "{{ data.unit }}";
@@ -300,10 +239,9 @@
     function switchBenchmark(mode) {
         const btnMom = document.getElementById('btn-mom');
         const btnYoy = document.getElementById('btn-yoy');
-        const btnWeather = document.getElementById('btn-weather');
         const caption = document.getElementById('benchmark-caption');
 
-        [btnMom, btnYoy, btnWeather].forEach(b => { if (b) b.classList.remove('active'); });
+        [btnMom, btnYoy].forEach(b => b.classList.remove('active'));
 
         if (mode === 'mom') {
             btnMom.classList.add('active');
@@ -317,12 +255,6 @@
             chart.data.datasets[1].label = "Benchmark: {{ data.prev_year_label }}";
             chart.data.datasets[1].data = yoySeries;
             chart.data.datasets[1].borderColor = '#94a3b8';
-        } else if (mode === 'weather') {
-            if (btnWeather) btnWeather.classList.add('active');
-            caption.innerText = "Comparing vs Weather-Normalized Expected Trajectory (Newcastle Upon Tyne)";
-            chart.data.datasets[1].label = "Expected (Regression Model)";
-            chart.data.datasets[1].data = weatherSeries;
-            chart.data.datasets[1].borderColor = '#8b5cf6'; // Violet reference line
         }
         chart.update();
     }
