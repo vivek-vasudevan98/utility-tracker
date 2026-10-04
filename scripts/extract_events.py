@@ -5,8 +5,12 @@ The report has a title/filter block above the table, group rows such as
 below it. This script finds the header row, keeps only real data rows and
 writes the matching events to a new workbook, grouped by event name.
 
+Several reports can be given at once; their rows are merged into one
+workbook. A booking event that appears in more than one report is kept
+once, using the report listed last, so list older reports first.
+
 Usage:
-    python scripts/extract_events.py report.xlsx [output.xlsx]
+    python scripts/extract_events.py report.xlsx [more_reports.xlsx ...] [-o output.xlsx]
 """
 import argparse
 import sys
@@ -35,12 +39,15 @@ EXCLUDED_TYPES = ["Teardown", "Dance"]
 # accepted for the date column.
 DATE_COLUMNS = ("Date", "Event Start Date")
 COLUMN_MAP = {
+    "Booking Event ID": "Event Id",
     "Booking Post As": "Event Name",
     "Function Room: Function Room Name": "Event Location",
     "Event Classification: Name": "Event Type",
 }
 REQUIRED = ["Event Status", "Expected", *COLUMN_MAP]
 TYPE_COLUMN = next(src for src, dst in COLUMN_MAP.items() if dst == "Event Type")
+ID_COLUMN = next(src for src, dst in COLUMN_MAP.items() if dst == "Event Id")
+OUTPUT_COLUMNS = ["Event Id", "Date", "Event Name", "Event Location", "Event Type"]
 
 
 def _norm(value):
@@ -77,8 +84,11 @@ def load_table(path):
     raw = pd.read_excel(path, header=None, dtype=object)
     header_idx = find_header_row(raw)
     table = raw.iloc[header_idx + 1 :].copy()
+    # Match headers case-insensitively, e.g. "Booking Event Id" or "ID".
+    known = {_norm(c): c for c in (*REQUIRED, *DATE_COLUMNS)}
     table.columns = [
-        str(c).replace("\xa0", " ").strip() if pd.notna(c) else f"col{i}"
+        known.get(_norm(c), str(c).replace("\xa0", " ").strip())
+        if pd.notna(c) else f"col{i}"
         for i, c in enumerate(raw.iloc[header_idx])
     ]
     date_col = next((c for c in DATE_COLUMNS if c in table.columns), None)
@@ -87,7 +97,29 @@ def load_table(path):
     table = table.rename(columns={date_col: "Date"})
     # Group headers, blank rows, totals and footer only fill the first cell.
     table["Date"] = pd.to_datetime(table["Date"], errors="coerce", dayfirst=True)
-    return table[table["Date"].notna()]
+    table = table[table["Date"].notna()].copy()
+    table[ID_COLUMN] = table[ID_COLUMN].map(
+        lambda v: str(v).replace("\xa0", " ").strip() if pd.notna(v) else None
+    )
+    return table
+
+
+def load_tables(paths):
+    """Read several reports into one table with one row per Booking Event ID.
+
+    Duplicates are dropped before filtering so the latest report decides,
+    e.g. a booking that has since been cancelled is not kept from an older
+    report where it was still Definite.
+    """
+    table = pd.concat([load_table(p) for p in paths], ignore_index=True)
+    has_id = table[ID_COLUMN].notna()
+    deduped = pd.concat(
+        [
+            table[has_id].drop_duplicates(subset=ID_COLUMN, keep="last"),
+            table[~has_id],
+        ]
+    ).sort_index()
+    return deduped, len(table) - len(deduped)
 
 
 def has_expected(value):
@@ -121,7 +153,8 @@ def write_grouped(df, path):
     wb = Workbook()
     ws = wb.active
     ws.title = "Events"
-    columns = ["Date", "Event Name", "Event Location", "Event Type"]
+    columns = OUTPUT_COLUMNS
+    date_col = columns.index("Date") + 1
     bold = Font(bold=True)
     group_fill = PatternFill("solid", fgColor="DDEBF7")
 
@@ -137,8 +170,8 @@ def write_grouped(df, path):
             ws.cell(group_row, col).fill = group_fill
         ws.cell(group_row, 1).font = bold
         for rec in rows[columns].itertuples(index=False):
-            ws.append([rec[0].to_pydatetime(), *rec[1:]])
-            ws.cell(ws.max_row, 1).number_format = "DD/MM/YYYY"
+            ws.append([v.to_pydatetime() if isinstance(v, pd.Timestamp) else v for v in rec])
+            ws.cell(ws.max_row, date_col).number_format = "DD/MM/YYYY"
             ws.row_dimensions[ws.max_row].outline_level = 1
 
     ws.sheet_properties.outlinePr.summaryBelow = False
@@ -150,21 +183,36 @@ def write_grouped(df, path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("input", type=Path, help="report .xlsx file")
     parser.add_argument(
-        "output",
+        "inputs",
         type=Path,
-        nargs="?",
-        help="output .xlsx file (default: <input>_events.xlsx)",
+        nargs="+",
+        help="report .xlsx file(s), oldest first",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        help="output .xlsx file (default: <input>_events.xlsx for one report, "
+        "consolidated_events.xlsx next to the first report for several)",
     )
     args = parser.parse_args(argv)
-    output = args.output or args.input.with_name(f"{args.input.stem}_events.xlsx")
+    first = args.inputs[0]
+    if args.output:
+        output = args.output
+    elif len(args.inputs) == 1:
+        output = first.with_name(f"{first.stem}_events.xlsx")
+    else:
+        output = first.with_name("consolidated_events.xlsx")
 
-    events = extract(load_table(args.input))
+    table, duplicates = load_tables(args.inputs)
+    events = extract(table)
     write_grouped(events, output)
+    if duplicates:
+        print(f"Skipped {duplicates} duplicate Booking Event ID row(s)")
     print(
         f"Wrote {len(events)} rows in {events['Event Name'].nunique()} "
-        f"event groups to {output}"
+        f"event groups from {len(args.inputs)} report(s) to {output}"
     )
 
 
