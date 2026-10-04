@@ -81,6 +81,34 @@
                 </button>
             </form>
         </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Event Load</div>
+                <div class="card-subtitle">
+                    {% if event_coverage %}
+                        Known for
+                        {% for first, last in event_coverage %}{{ first.strftime('%d %b %Y') }} – {{ last.strftime('%d %b %Y') }}{{ ", " if not loop.last else "." }}{% endfor %}
+                        Other days are unknown.
+                    {% else %}
+                        No events uploaded yet.
+                    {% endif %}
+                </div>
+            </div>
+
+            <form action="{{ url_for('entry.upload_events') }}" method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="selected_month" value="{{ selected_month }}">
+
+                <div class="form-group" style="margin-bottom: 1.25rem;">
+                    <label for="events_file">Select Spreadsheet (.xlsx, .xls):</label>
+                    <input type="file" id="events_file" name="events_file" accept=".xlsx, .xls" required>
+                    <span class="input-hint">Expected columns: <code>date</code>, <code>load</code>. The file covers every day from its first to its last date: days not listed count as no events. Re-uploading replaces those days only.</span>
+                </div>
+
+                <button type="submit" class="btn btn-secondary" style="width: 100%;">Upload Events</button>
+            </form>
+        </div>
     </div>
 
 </div>

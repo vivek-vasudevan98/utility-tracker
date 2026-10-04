@@ -34,3 +34,27 @@ class DailyWeather(db.Model):
 
     def __repr__(self):
         return f"<DailyWeather {self.date}: T={self.temp_mean}°C>"
+
+class EventDay(db.Model):
+    """
+    Event load (0 = no events) for each day covered by an uploaded events file.
+    Days with no row are unknown, which is different from a day with no events.
+    """
+    __tablename__ = 'event_day'
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.String(10), nullable=False, unique=True)  # Format: "YYYY-MM-DD"
+    load = db.Column(db.Float, nullable=False)                    # Combined event load that day
+
+    def __repr__(self):
+        return f"<EventDay {self.date}: {self.load}>"
+
+class ConfirmedRise(db.Model):
+    """A sudden rise in usage the user has confirmed as the new normal for a utility."""
+    __tablename__ = 'confirmed_rise'
+    __table_args__ = (db.UniqueConstraint('utility', 'start_date'),)
+    id = db.Column(db.Integer, primary_key=True)
+    utility = db.Column(db.String(20), nullable=False)            # 'electricity', 'gas' or 'water'
+    start_date = db.Column(db.String(10), nullable=False)         # First day of the rise, "YYYY-MM-DD"
+
+    def __repr__(self):
+        return f"<ConfirmedRise {self.utility} from {self.start_date}>"
