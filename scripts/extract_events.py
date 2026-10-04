@@ -37,7 +37,7 @@ DATE_COLUMNS = ("Date", "Event Start Date")
 COLUMN_MAP = {
     "Booking Post As": "Event Name",
     "Function Room: Function Room Name": "Event Location",
-    "Event Name": "Event Type",
+    "Event Classification: Name": "Event Type",
 }
 REQUIRED = ["Event Status", "Expected", *COLUMN_MAP]
 
