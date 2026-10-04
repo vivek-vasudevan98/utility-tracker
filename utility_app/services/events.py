@@ -65,13 +65,17 @@ def get_event_loads(start: date, end: date) -> dict:
     rows = EventDay.query.filter(EventDay.date >= start.isoformat(), EventDay.date <= end.isoformat())
     return {r.date: r.load for r in rows}
 
-def event_coverage() -> list:
-    """The stretches of consecutive days with known events, as [(first day, last day), ...]."""
+def known_stretches(column) -> list:
+    """The stretches of consecutive dates in `column`, as [(first day, last day), ...]."""
     stretches = []
-    for (day_str,) in db.session.query(EventDay.date).order_by(EventDay.date):
+    for (day_str,) in db.session.query(column).order_by(column):
         day = date.fromisoformat(day_str)
         if stretches and day - stretches[-1][1] == timedelta(days=1):
             stretches[-1][1] = day
         else:
             stretches.append([day, day])
     return [tuple(s) for s in stretches]
+
+def event_coverage() -> list:
+    """The stretches of consecutive days with known events, as [(first day, last day), ...]."""
+    return known_stretches(EventDay.date)

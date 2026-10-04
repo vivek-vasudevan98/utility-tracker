@@ -5,6 +5,7 @@ from utility_app import db
 from utility_app.services.calculations import METERS
 from utility_app.services.excel_handler import process_excel_upload
 from utility_app.services.events import import_event_file, event_coverage
+from utility_app.services.occupancy import import_occupancy_file, occupancy_coverage
 from utility_app.services.readings import save_reading
 from utility_app.services.months import normalize_month
 from utility_app.services.analytics import sync_completed_month_bill
@@ -36,7 +37,8 @@ def index():
         flash(f"'{raw}' isn't a valid month.", "danger")
         return redirect(url_for('entry.index'))
     return render_template('entry/index.html', selected_month=selected_month,
-                           event_coverage=event_coverage())
+                           event_coverage=event_coverage(),
+                           occupancy_coverage=occupancy_coverage())
 
 @entry_bp.route('/add', methods=['POST'])
 def add():
@@ -121,5 +123,14 @@ def upload_events():
     file = uploaded_excel_file('events_file')
     if file is not None:
         category, msg = import_event_file(file)
+        flash(msg, category)
+    return redirect(url_for('entry.index', month=month))
+
+@entry_bp.route('/occupancy', methods=['POST'])
+def upload_occupancy():
+    month = normalize_month(request.form.get('selected_month', '')) or ''
+    file = uploaded_excel_file('occupancy_file')
+    if file is not None:
+        category, msg = import_occupancy_file(file)
         flash(msg, category)
     return redirect(url_for('entry.index', month=month))

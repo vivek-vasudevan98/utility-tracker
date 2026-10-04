@@ -246,7 +246,7 @@ def describe_effects(effects: dict, unit: str) -> list:
     """Each effect in words, e.g. '-630 kWh on Sun–Wed'."""
     lines = []
     for name, coef in (effects or {}).items():
-        amount = f"{coef:+,.1f}" if abs(coef) < 10 else f"{coef:+,.0f}"
+        amount = f"{coef:+,.2f}" if abs(coef) < 1 else f"{coef:+,.1f}" if abs(coef) < 10 else f"{coef:+,.0f}"
         lines.append(f"{amount} {unit} {INPUT_LABELS[name]}")
     return lines
 

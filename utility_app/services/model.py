@@ -3,9 +3,9 @@ Consumption model: judges each day's usage against what was expected.
 
     expected = baseline + effects
 
-Effects: how much weather, Sun-Wed and events add to (or take off) a day's
-usage, with a separate level for each stretch between step changes so a fix
-can't be mistaken for an effect.
+Effects: how much weather, Sun-Wed, events and occupancy add to (or take
+off) a day's usage, with a separate level for each stretch between step
+changes so a fix can't be mistaken for an effect.
 
 Baseline: the recent level once effects are taken out, i.e. the average of
 (usage - effects) over the last 28 good reads since the latest step change.
@@ -38,6 +38,7 @@ from utility_app import db
 from utility_app.models import UtilityEntry, ConfirmedRise
 from utility_app.services.calculations import METERS, get_daily_usage
 from utility_app.services.events import get_event_loads
+from utility_app.services.occupancy import get_occupancy
 from utility_app.services.weather_service import (
     get_weather_range, heating_degree_days, cooling_degree_days
 )
@@ -46,17 +47,24 @@ from utility_app.services.weather_service import (
 INPUTS = {
     'gas': ('hdd', 'sun_hdd', 'sun_wed'),
     'electricity': ('hdd', 'cdd', 'event', 'solar', 'sun_wed'),
-    'water': ('temp', 'sun_wed'),
+    'water': ('occupancy', 'sun_wed'),
 }
 INPUT_LABELS = {
     'hdd': 'per heating degree-day (below 16 °C)',
     'cdd': 'per cooling degree-day (above 17 °C)',
-    'temp': 'per °C of mean temperature',
+    'occupancy': 'per percentage point of occupancy',
     'sun_hdd': 'per hour of sunshine, per heating degree-day',
     'solar': 'per MJ/m² of solar radiation',
     'sun_wed': 'on Sun–Wed',
     'event': 'per point of event load',
 }
+# Inputs that come from the downloaded weather
+WEATHER_INPUTS = {'hdd', 'cdd', 'temp', 'sun_hdd', 'solar'}
+# Inputs that can be unknown on a day (not uploaded): they are learned only
+# from days where they are known, and an unknown day is taken as typical
+OPTIONAL_INPUTS = ('event', 'occupancy')
+# Inputs learned at any value; the others need MIN_ACTIVE_DAYS days above 0
+LEVEL_INPUTS = ('sun_wed', 'occupancy')
 COLD_BASE = 8.0             # °C below which a day counts as cold in the gas heating check
 LOW_DAYS = (6, 0, 1, 2)     # Sun, Mon, Tue, Wed (Python weekday numbers)
 
@@ -97,19 +105,28 @@ def shift_months(day: date, months: int) -> date:
     return date(day.year + years, month_index + 1, 1)
 
 
-def day_inputs(day: date, weather: dict, event_load):
-    """Every model input for one day; event is None when its load is unknown."""
-    temp = weather['temp_mean']
-    return {
-        'hdd': heating_degree_days(temp),
-        'cdd': cooling_degree_days(temp),
-        'temp': temp,
-        # Sun only saves gas when there is heating to save: none on a warm day
-        'sun_hdd': weather['sunshine_hours'] * heating_degree_days(temp),
-        'solar': weather['solar_mj'],
+def day_inputs(day: date, weather, event_load, occupancy):
+    """
+    Every model input for one day. Weather inputs are None when the day's
+    weather isn't downloaded; event and occupancy are None when not uploaded.
+    """
+    inputs = {
         'sun_wed': 1.0 if day.weekday() in LOW_DAYS else 0.0,
         'event': event_load,
+        'occupancy': occupancy,
+        'hdd': None, 'cdd': None, 'temp': None, 'sun_hdd': None, 'solar': None,
     }
+    if weather:
+        temp = weather['temp_mean']
+        inputs.update({
+            'hdd': heating_degree_days(temp),
+            'cdd': cooling_degree_days(temp),
+            'temp': temp,
+            # Sun only saves gas when there is heating to save: none on a warm day
+            'sun_hdd': weather['sunshine_hours'] * heating_degree_days(temp),
+            'solar': weather['solar_mj'],
+        })
+    return inputs
 
 
 def mark_outliers(values: list) -> list:
@@ -147,6 +164,7 @@ class ConsumptionModel:
         self.step_effects = None  # effects learned from the whole history, with its step changes
         self.fit = None           # the current month's judging effects, mode and typical miss
         self.fits = {}            # month start -> that month's fit
+        self.typical = {'event': 0.0}  # value used for an optional input on a day it's unknown
 
     # ---------- data ----------
 
@@ -157,8 +175,12 @@ class ConsumptionModel:
         start, end = date.fromisoformat(first), date.today()
         diff_key = METERS[self.utility][0]
         usage = [r for r in get_daily_usage(start, end) if r[diff_key] is not None]
-        weather = get_weather_range(start, end)
+        # Only download weather for utilities that use it
+        weather = get_weather_range(start, end) if set(self.inputs) & WEATHER_INPUTS else {}
         events = get_event_loads(start, end)
+        occupancy = get_occupancy(start, end)
+        if occupancy:
+            self.typical['occupancy'] = sum(occupancy.values()) / len(occupancy)
 
         good = mark_outliers([r[diff_key] for r in usage])
         for r, is_good in zip(usage, good):
@@ -167,7 +189,7 @@ class ConsumptionModel:
             self.days.append({
                 'date': day,
                 'usage': float(r[diff_key]),
-                'inputs': day_inputs(day, w, events.get(r['date'])) if w else None,
+                'inputs': day_inputs(day, w, events.get(r['date']), occupancy.get(r['date'])),
                 'good': is_good,
                 'held': False,
                 'expected': None,
@@ -176,6 +198,10 @@ class ConsumptionModel:
             })
 
     # ---------- effects ----------
+
+    def has_inputs(self, day: dict) -> bool:
+        """True when every input this utility needs, apart from optional ones, is known."""
+        return all(day['inputs'][n] is not None for n in self.inputs if n not in OPTIONAL_INPUTS)
 
     def stretch_start(self, day: date, boundaries=None):
         starts = [b for b in (self.boundaries if boundaries is None else boundaries) if b <= day]
@@ -188,18 +214,18 @@ class ConsumptionModel:
         """
         boundaries = self.boundaries if boundaries is None else boundaries
         rows = [d for d in self.days
-                if start <= d['date'] < end and d['good'] and not d['held'] and d['inputs']]
+                if start <= d['date'] < end and d['good'] and not d['held'] and self.has_inputs(d)]
 
         used = []
         for name in self.inputs:
-            if name == 'event':
-                known = [d for d in rows if d['inputs']['event'] is not None]
-                if len(known) < MIN_TRAINING_DAYS or sum(d['inputs']['event'] > 0 for d in known) < MIN_ACTIVE_DAYS:
-                    continue      # not enough event history yet: leave events out
-                rows = known
-            elif name not in ('sun_wed', 'temp'):
-                if sum(d['inputs'][name] > 0 for d in rows) < MIN_ACTIVE_DAYS:
-                    continue
+            candidate = rows
+            if name in OPTIONAL_INPUTS:
+                candidate = [d for d in rows if d['inputs'][name] is not None]
+                if len(candidate) < MIN_TRAINING_DAYS:
+                    continue      # not enough of it uploaded yet: leave it out
+            if name not in LEVEL_INPUTS and sum(d['inputs'][name] > 0 for d in candidate) < MIN_ACTIVE_DAYS:
+                continue
+            rows = candidate
             used.append(name)
         # Re-check against the (possibly smaller) set of rows: an input that never varies can't be learned
         used = [n for n in used if np.ptp([d['inputs'][n] for d in rows] or [0]) > 0]
@@ -219,17 +245,20 @@ class ConsumptionModel:
         coefs, *_ = np.linalg.lstsq(matrix, target, rcond=None)
         return dict(zip(used, coefs[len(stretches):].tolist())), len(rows)
 
-    @staticmethod
-    def effect(day: dict, effects: dict) -> float:
+    def effect(self, day: dict, effects: dict) -> float:
         if not effects:
             return 0.0
-        # An unknown event load counts as no events when predicting
-        return sum(c * (day['inputs'][n] or 0.0) for n, c in effects.items())
+        total = 0.0
+        for name, coef in effects.items():
+            value = day['inputs'][name]
+            # An unknown optional input counts as typical (no events, average occupancy)
+            total += coef * (self.typical.get(name, 0.0) if value is None else value)
+        return total
 
     # ---------- expectation ----------
 
     def usable(self, day: dict, effects) -> bool:
-        return day['good'] and not day['held'] and (day['inputs'] is not None or not effects)
+        return day['good'] and not day['held'] and (not effects or self.has_inputs(day))
 
     def baseline(self, i: int, effects):
         """Average of (usage - effects) over the good reads before day i in its stretch."""
@@ -246,7 +275,7 @@ class ConsumptionModel:
 
     def expected(self, i: int, effects):
         day = self.days[i]
-        if effects and not day['inputs']:
+        if effects and not self.has_inputs(day):
             return None
         base = self.baseline(i, effects)
         return None if base is None else base + self.effect(day, effects)
@@ -269,7 +298,7 @@ class ConsumptionModel:
         start = self.stretch_start(first['date'])
         # Judge against a settled baseline: at least STEP_READS reads of this stretch before it
         settled = sum(1 for d in self.days[:i] if d['date'] >= start)
-        if settled < STEP_READS or any(d['held'] or not d['inputs'] for d in run):
+        if settled < STEP_READS or any(d['held'] or not self.has_inputs(d) for d in run):
             return i + 1
 
         effects, _ = self.train(date.min, date.max, sorted(self.boundaries + [first['date']]))
@@ -302,7 +331,7 @@ class ConsumptionModel:
         if all(a >= (1 + STEP_CHANGE) * e for a, e in zip(actual, expect)):
             # Hold the rise for as long as it lasts
             j = i
-            while j < len(self.days) and self.days[j]['inputs'] and \
+            while j < len(self.days) and self.has_inputs(self.days[j]) and \
                     self.days[j]['usage'] >= (1 + STEP_CHANGE) * (base + self.effect(self.days[j], effects)):
                 self.days[j]['held'] = True
                 j += 1
@@ -324,7 +353,7 @@ class ConsumptionModel:
     def check_heating(self, effects):
         """Holds cold days out of the baseline while they drift up compared with mild days."""
         for i, day in enumerate(self.days):
-            if not day['inputs'] or day['inputs']['temp'] >= COLD_BASE or day['held']:
+            if day['inputs']['temp'] is None or day['inputs']['temp'] >= COLD_BASE or day['held']:
                 continue
             base = self.baseline(i, effects)
             if base is None or base <= 0:

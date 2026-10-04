@@ -193,7 +193,7 @@
                ({{ m.fit.training_period[0].strftime('%b %Y') }} – {{ m.fit.training_period[1].strftime('%b %Y') }}).</p>
         {% elif m.status == 'learning' %}
             <span class="status-badge status-learning">Still learning</span>
-            <p>Expected = recent baseline + weather effects learned from the whole history.
+            <p>Expected = recent baseline + effects learned from the whole history.
                The effects from data {{ m.holdout_months }}+ months old take over once they beat a plain 28-day average on the last 90 days.</p>
         {% elif m.status == 'none' %}
             <p class="model-note">No readings to judge in this month.</p>

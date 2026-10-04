@@ -48,6 +48,16 @@ class EventDay(db.Model):
     def __repr__(self):
         return f"<EventDay {self.date}: {self.load}>"
 
+class OccupancyDay(db.Model):
+    """Building occupancy (%) for each day it was uploaded; days with no row are unknown."""
+    __tablename__ = 'occupancy_day'
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.String(10), nullable=False, unique=True)  # Format: "YYYY-MM-DD"
+    occupancy = db.Column(db.Float, nullable=False)               # 0-100 %
+
+    def __repr__(self):
+        return f"<OccupancyDay {self.date}: {self.occupancy}%>"
+
 class ConfirmedRise(db.Model):
     """A sudden rise in usage the user has confirmed as the new normal for a utility."""
     __tablename__ = 'confirmed_rise'

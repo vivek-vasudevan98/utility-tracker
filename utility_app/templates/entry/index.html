@@ -109,6 +109,34 @@
                 <button type="submit" class="btn btn-secondary" style="width: 100%;">Upload Events</button>
             </form>
         </div>
+
+        <div class="card">
+            <div class="card-header">
+                <div class="card-title">Occupancy</div>
+                <div class="card-subtitle">
+                    {% if occupancy_coverage %}
+                        Known for
+                        {% for first, last in occupancy_coverage %}{{ first.strftime('%d %b %Y') }} – {{ last.strftime('%d %b %Y') }}{{ ", " if not loop.last else "." }}{% endfor %}
+                        Other days are unknown.
+                    {% else %}
+                        No occupancy uploaded yet.
+                    {% endif %}
+                </div>
+            </div>
+
+            <form action="{{ url_for('entry.upload_occupancy') }}" method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="selected_month" value="{{ selected_month }}">
+
+                <div class="form-group" style="margin-bottom: 1.25rem;">
+                    <label for="occupancy_file">Select Spreadsheet (.xlsx, .xls):</label>
+                    <input type="file" id="occupancy_file" name="occupancy_file" accept=".xlsx, .xls" required>
+                    <span class="input-hint">Columns <code>date</code>, <code>occupancy</code> (0–100 %), on one or more sheets. Blank cells are treated as unknown and change nothing; filled days replace what was stored.</span>
+                </div>
+
+                <button type="submit" class="btn btn-secondary" style="width: 100%;">Upload Occupancy</button>
+            </form>
+        </div>
     </div>
 
 </div>
