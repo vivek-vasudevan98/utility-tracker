@@ -1,7 +1,8 @@
 """Work out the daily Gateshead Suite load per event.
 
-Reads the workbook written by extract_events.py and writes one row per
-date and event name with a load score:
+Reads the workbook written by extract_events.py, scores each event's load
+per date, then writes one row per date listing that day's events
+(separated by "; ") and their combined load. Each event scores:
 
 - Gateshead Suite (the whole suite) counts 3.
 - A partition of it counts 1 per room it covers, so "Hillgate Suite" is 1
@@ -89,11 +90,18 @@ def calculate_load(events):
     )
 
 
+def combine_by_date(load):
+    """Merge each date's events into one row: names joined by "; ", loads summed."""
+    return load.groupby("Date", as_index=False, sort=True).agg(
+        Events=("Event Name", "; ".join), Load=("Load", "sum")
+    )
+
+
 def write_load(df, path):
     wb = Workbook()
     ws = wb.active
     ws.title = "Event Load"
-    columns = ["Date", "Event Name", "Load"]
+    columns = ["Date", "Events", "Load"]
     ws.append(columns)
     for cell in ws[1]:
         cell.font = Font(bold=True)
@@ -103,7 +111,7 @@ def write_load(df, path):
         ws.cell(ws.max_row, 1).number_format = "DD/MM/YYYY"
     for i, col in enumerate(columns, 1):
         width = max([len(col)] + [len(str(v)) for v in df[col]]) if len(df) else len(col)
-        ws.column_dimensions[get_column_letter(i)].width = min(max(width, 12) + 2, 60)
+        ws.column_dimensions[get_column_letter(i)].width = min(max(width, 12) + 2, 100)
     wb.save(path)
 
 
@@ -126,9 +134,9 @@ def main(argv=None):
     args = parser.parse_args(argv)
     output = args.output or default_output(args.input)
 
-    load = calculate_load(load_events(args.input))
+    load = combine_by_date(calculate_load(load_events(args.input)))
     write_load(load, output)
-    print(f"Wrote {len(load)} date/event rows to {output}")
+    print(f"Wrote {len(load)} date rows to {output}")
 
 
 if __name__ == "__main__":
