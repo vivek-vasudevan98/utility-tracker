@@ -23,13 +23,14 @@ class MonthlyUtilityBill(db.Model):
     def __repr__(self):
         return f"<MonthlyUtilityBill {self.month}>"
 
-class DailyWeatherCache(db.Model):
-    __tablename__ = 'daily_weather_cache'
+class DailyWeather(db.Model):
+    """Daily weather downloaded from Open-Meteo (a cache: it can always be re-downloaded)."""
+    __tablename__ = 'daily_weather'
     id = db.Column(db.Integer, primary_key=True)
     date = db.Column(db.String(10), nullable=False, unique=True)  # Format: "YYYY-MM-DD"
-    temp_mean = db.Column(db.Float, nullable=False)               # Mean Daily Temp (°C)
-    hdd_16 = db.Column(db.Float, nullable=False)                  # max(0, 16 - temp_mean)
-    cdd_20 = db.Column(db.Float, nullable=False)                  # max(0, temp_mean - 20)
+    temp_mean = db.Column(db.Float, nullable=False)               # Mean daily air temperature (°C)
+    sunshine_hours = db.Column(db.Float, nullable=False)          # Hours of sunshine
+    solar_mj = db.Column(db.Float, nullable=False)                # Solar radiation (MJ/m²)
 
     def __repr__(self):
-        return f"<DailyWeatherCache {self.date}: T={self.temp_mean}°C>"
+        return f"<DailyWeather {self.date}: T={self.temp_mean}°C>"

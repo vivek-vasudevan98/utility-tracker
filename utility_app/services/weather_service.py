@@ -3,11 +3,15 @@ import json
 import time
 from datetime import date, timedelta
 from utility_app import db
-from utility_app.models import DailyWeatherCache
+from utility_app.models import DailyWeather
 
-# Coordinates for Newcastle upon Tyne, UK
-LATITUDE = 54.9783
-LONGITUDE = -1.6178
+# The building's location (Open-Meteo grid point)
+LATITUDE = 54.9385
+LONGITUDE = -1.6104
+
+# Degree-day base temperatures (°C), applied to the daily mean temperature
+HDD_BASE = 16.0
+CDD_BASE = 17.0
 
 # The Open-Meteo archive only holds data up to roughly this many days ago.
 # Requesting any later date makes the whole request fail.
@@ -22,58 +26,58 @@ RETRY_COOLDOWN_SECONDS = 30 * 60
 # (first missing day, last missing day) -> time of the last download attempt
 _last_attempt = {}
 
+def heating_degree_days(temp_mean: float) -> float:
+    """How far the day's mean temperature fell below HDD_BASE (0 on warmer days)."""
+    return max(0.0, HDD_BASE - temp_mean)
+
+def cooling_degree_days(temp_mean: float) -> float:
+    """How far the day's mean temperature rose above CDD_BASE (0 on cooler days)."""
+    return max(0.0, temp_mean - CDD_BASE)
+
 def fetch_and_cache_weather(start_date: str, end_date: str):
     """
-    Fetches daily temperatures from Open-Meteo Archive/Forecast APIs,
-    computes HDD (16°C) and CDD (20°C), and saves them into DailyWeatherCache.
+    Downloads daily mean temperature, sunshine and solar radiation from the
+    Open-Meteo archive and saves them into DailyWeather.
     """
-    # Open-Meteo Historical Archive API supports dates up to ~5 days ago;
-    # Forecast API covers recent and near-term days.
     url = (
         f"https://archive-api.open-meteo.com/v1/archive?"
         f"latitude={LATITUDE}&longitude={LONGITUDE}&"
         f"start_date={start_date}&end_date={end_date}&"
-        f"daily=temperature_2m_mean&timezone=Europe%2FLondon"
+        f"daily=temperature_2m_mean,sunshine_duration,shortwave_radiation_sum&"
+        f"timezone=Europe%2FLondon"
     )
-    
+
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'CommercialUtilityTracker/1.0'})
         with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT_SECONDS) as response:
             payload = json.loads(response.read().decode('utf-8'))
-            
-        if 'daily' not in payload or 'time' not in payload['daily']:
+
+        daily = payload.get('daily', {})
+        if 'time' not in daily:
             return False
 
-        dates = payload['daily']['time']
-        temps = payload['daily']['temperature_2m_mean']
         existing = {
-            row.date: row for row in DailyWeatherCache.query.filter(
-                DailyWeatherCache.date >= start_date,
-                DailyWeatherCache.date <= end_date
+            row.date: row for row in DailyWeather.query.filter(
+                DailyWeather.date >= start_date,
+                DailyWeather.date <= end_date
             )
         }
 
-        for d_str, temp in zip(dates, temps):
-            if temp is None:
+        for d_str, temp, sunshine_s, solar in zip(
+            daily['time'], daily['temperature_2m_mean'],
+            daily['sunshine_duration'], daily['shortwave_radiation_sum']
+        ):
+            # Skip incomplete days; they are downloaded again on a later attempt
+            if temp is None or sunshine_s is None or solar is None:
                 continue
-            
-            # Physics calculations
-            hdd = max(0.0, round(16.0 - float(temp), 2))
-            cdd = max(0.0, round(float(temp) - 20.0, 2))
 
-            cached = existing.get(d_str)
-            if not cached:
-                cached = DailyWeatherCache(
-                    date=d_str,
-                    temp_mean=float(temp),
-                    hdd_16=hdd,
-                    cdd_20=cdd
-                )
-                db.session.add(cached)
-            else:
-                cached.temp_mean = float(temp)
-                cached.hdd_16 = hdd
-                cached.cdd_20 = cdd
+            row = existing.get(d_str)
+            if not row:
+                row = DailyWeather(date=d_str)
+                db.session.add(row)
+            row.temp_mean = float(temp)
+            row.sunshine_hours = round(float(sunshine_s) / 3600, 2)
+            row.solar_mj = float(solar)
 
         db.session.commit()
         return True
@@ -87,7 +91,7 @@ def fetch_and_cache_weather(start_date: str, end_date: str):
 
 def get_weather_range(start: date, end: date) -> dict:
     """
-    Returns a dictionary of date -> {temp_mean, hdd_16, cdd_20} for start..end (inclusive).
+    Returns a dictionary of date -> {temp_mean, sunshine_hours, solar_mj} for start..end (inclusive).
     Days missing from the SQLite cache are downloaded from Open-Meteo in one
     request covering just the missing stretch, at most once per RETRY_COOLDOWN_SECONDS.
     """
@@ -104,9 +108,9 @@ def get_weather_range(start: date, end: date) -> dict:
     end_date = range_end.isoformat()
 
     def load_cached():
-        return DailyWeatherCache.query.filter(
-            DailyWeatherCache.date >= start_date,
-            DailyWeatherCache.date <= end_date
+        return DailyWeather.query.filter(
+            DailyWeather.date >= start_date,
+            DailyWeather.date <= end_date
         ).all()
 
     # Check local SQLite cache first
@@ -129,8 +133,8 @@ def get_weather_range(start: date, end: date) -> dict:
     return {
         r.date: {
             'temp_mean': r.temp_mean,
-            'hdd_16': r.hdd_16,
-            'cdd_20': r.cdd_20
+            'sunshine_hours': r.sunshine_hours,
+            'solar_mj': r.solar_mj
         }
         for r in cached_rows
     }

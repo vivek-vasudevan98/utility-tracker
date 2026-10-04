@@ -2,6 +2,7 @@ import os
 import secrets
 from flask import Flask, flash, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
+from sqlalchemy import text
 from flask_wtf.csrf import CSRFProtect, CSRFError
 from werkzeug.exceptions import RequestEntityTooLarge
 
@@ -74,6 +75,11 @@ def create_app():
     with app.app_context():
         # Ensure database tables exist without wiping existing records
         from utility_app import models
+        # The old weather cache (temperature and degree-days only, for the
+        # previous location) was replaced by daily_weather; it held nothing
+        # that can't be downloaded again
+        db.session.execute(text('DROP TABLE IF EXISTS daily_weather_cache'))
+        db.session.commit()
         db.create_all()
 
     return app
