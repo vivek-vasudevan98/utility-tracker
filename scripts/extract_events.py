@@ -28,7 +28,7 @@ ROOMS = [
     "Hillgate/Oakwellgate Suite",
     "Pipewellgate/Oakwellgate Suite"
 ]
-# Event types (the report's "Event Name" column) to leave out.
+# Values of the output "Event Type" column to leave out.
 EXCLUDED_TYPES = ["Teardown", "Dance"]
 
 # Report column -> output column. Either "Date" or "Event Start Date" is
@@ -40,6 +40,7 @@ COLUMN_MAP = {
     "Event Classification: Name": "Event Type",
 }
 REQUIRED = ["Event Status", "Expected", *COLUMN_MAP]
+TYPE_COLUMN = next(src for src, dst in COLUMN_MAP.items() if dst == "Event Type")
 
 
 def _norm(value):
@@ -104,7 +105,7 @@ def extract(table):
             lambda v: pd.notna(v) and _room_key(v) in ROOM_KEYS
         )
         & table["Expected"].map(has_expected)
-        & ~table["Event Name"].map(lambda v: _norm(v) in EXCLUDED_TYPE_KEYS)
+        & ~table[TYPE_COLUMN].map(lambda v: _norm(v) in EXCLUDED_TYPE_KEYS)
     )
     out = table.loc[mask, ["Date", *COLUMN_MAP]].rename(columns=COLUMN_MAP)
     for col in COLUMN_MAP.values():
