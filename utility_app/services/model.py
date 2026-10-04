@@ -44,21 +44,20 @@ from utility_app.services.weather_service import (
 
 # Inputs each utility's usage is explained by
 INPUTS = {
-    'gas': ('hdd', 'cold', 'sunshine', 'sun_wed'),
+    'gas': ('hdd', 'sun_hdd', 'sun_wed'),
     'electricity': ('hdd', 'cdd', 'event', 'solar', 'sun_wed'),
     'water': ('temp', 'sun_wed'),
 }
 INPUT_LABELS = {
     'hdd': 'per heating degree-day (below 16 °C)',
-    'cold': 'extra per degree below 8 °C',
     'cdd': 'per cooling degree-day (above 17 °C)',
     'temp': 'per °C of mean temperature',
-    'sunshine': 'per hour of sunshine',
+    'sun_hdd': 'per hour of sunshine, per heating degree-day',
     'solar': 'per MJ/m² of solar radiation',
     'sun_wed': 'on Sun–Wed',
     'event': 'per point of event load',
 }
-COLD_BASE = 8.0             # °C below which gas heating gets steeper
+COLD_BASE = 8.0             # °C below which a day counts as cold in the gas heating check
 LOW_DAYS = (6, 0, 1, 2)     # Sun, Mon, Tue, Wed (Python weekday numbers)
 
 # Effects for judging days are learned from data this many months old and older...
@@ -103,10 +102,10 @@ def day_inputs(day: date, weather: dict, event_load):
     temp = weather['temp_mean']
     return {
         'hdd': heating_degree_days(temp),
-        'cold': max(0.0, COLD_BASE - temp),
         'cdd': cooling_degree_days(temp),
         'temp': temp,
-        'sunshine': weather['sunshine_hours'],
+        # Sun only saves gas when there is heating to save: none on a warm day
+        'sun_hdd': weather['sunshine_hours'] * heating_degree_days(temp),
         'solar': weather['solar_mj'],
         'sun_wed': 1.0 if day.weekday() in LOW_DAYS else 0.0,
         'event': event_load,
