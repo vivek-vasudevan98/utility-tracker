@@ -29,7 +29,7 @@ ROOMS = [
     "Pipewellgate/Oakwellgate Suite"
 ]
 # Event types (the report's "Event Name" column) to leave out.
-EXCLUDED_TYPES = ["Teardown"]
+EXCLUDED_TYPES = ["Teardown", "Dance"]
 
 # Report column -> output column. Either "Date" or "Event Start Date" is
 # accepted for the date column.
