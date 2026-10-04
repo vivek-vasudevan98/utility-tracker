@@ -26,9 +26,10 @@ Two passes over the history:
 
 2. Judging each day, with effects learned once a month from data 3 to 15
    months old. They are checked on the last 90 days, which they never saw:
-   if they don't beat a plain 28-day average there, the utility is "still
-   learning" and the plain average is the expectation instead. A day is
-   flagged when it misses expected by more than twice the typical miss.
+   until they beat a plain 28-day average there, the utility is "still
+   learning" and days are judged with the step-change pass's effects
+   (learned from the whole history) instead. A day is flagged when it
+   misses expected by more than twice the typical miss.
 """
 from datetime import date, timedelta
 from statistics import median
@@ -350,14 +351,19 @@ class ConsumptionModel:
     # ---------- pass 2: judging each day ----------
 
     def retrain(self, i: int):
-        """This month's effects (3 to 15 months old), checked on the last 90 days."""
+        """
+        This month's effects (3 to 15 months old), checked on the last 90 days
+        against a plain 28-day average. Until they beat it, the utility is
+        still learning and days are judged with the step-change pass's effects
+        (learned from the whole history) instead.
+        """
         month_start = self.days[i]['date'].replace(day=1)
         window_start = shift_months(month_start, -(HOLDOUT_MONTHS + TRAINING_MONTHS))
         window_end = shift_months(month_start, -HOLDOUT_MONTHS)
         effects, training_days = self.train(window_start, window_end)
 
         eval_from = month_start - timedelta(days=EVALUATION_DAYS)
-        model_miss, plain_miss = [], []
+        model_miss, plain_miss, learning_miss = [], [], []
         for j in range(i - 1, -1, -1):
             d = self.days[j]
             if d['date'] < eval_from:
@@ -366,9 +372,11 @@ class ConsumptionModel:
                 continue
             plain = self.expected(j, None)
             modelled = self.expected(j, effects) if effects else None
-            if plain is None or (effects and modelled is None):
+            learning = self.expected(j, self.step_effects)
+            if plain is None or learning is None or (effects and modelled is None):
                 continue
             plain_miss.append(d['usage'] - plain)
+            learning_miss.append(d['usage'] - learning)
             if effects:
                 model_miss.append(d['usage'] - modelled)
 
@@ -383,14 +391,14 @@ class ConsumptionModel:
             'model_miss': rms(model_miss) if model_miss else None,
             'plain_miss': rms(plain_miss) if plain_miss else None,
             'evaluation_reads': len(plain_miss),
-            'typical_miss': (rms(model_miss) if use_model else rms(plain_miss)) if enough else None,
+            'typical_miss': (rms(model_miss) if use_model else rms(learning_miss)) if enough else None,
         }
 
     def judge(self):
         for i, day in enumerate(self.days):
             if self.fit is None or day['date'].replace(day=1) != self.fit['month']:
                 self.retrain(i)
-            effects = self.fit['effects'] if self.fit['mode'] == 'model' else None
+            effects = self.fit['effects'] if self.fit['mode'] == 'model' else self.step_effects
             day['expected'] = self.expected(i, effects)
             day['mode'] = self.fit['mode']
             typical = self.fit['typical_miss']
