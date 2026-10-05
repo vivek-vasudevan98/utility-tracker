@@ -4,7 +4,9 @@ from datetime import date
 from utility_app import db
 from utility_app.models import MonthlyUtilityBill, ConfirmedRise
 from utility_app.services.calculations import get_month_records, get_month_usage
-from utility_app.services.model import run_model, INPUT_LABELS, FLAG_MULTIPLE, HOLDOUT_MONTHS
+from utility_app.services.model import (
+    run_model, metered_expected, INPUT_LABELS, FLAG_MULTIPLE, HOLDOUT_MONTHS
+)
 
 def get_days_in_month(year: int, month: int) -> int:
     """Returns the total number of calendar days in a given month."""
@@ -267,13 +269,15 @@ def get_model_view(utility: str, target_month: str, unit: str) -> dict:
     for d in model.days:
         if d['date'].strftime('%Y-%m') != target_month or d['expected'] is None:
             continue
+        # Shown as metered: expected over the hours the day's reads span
+        exp = metered_expected(d)
         i = d['date'].day - 1
-        expected[i] = math.ceil(d['expected'])
+        expected[i] = math.ceil(exp)
         flagged[i] = d['flagged']
-        actual_sum += d['usage']
-        expected_sum += d['expected']
+        actual_sum += d['metered']
+        expected_sum += exp
         if d['flagged']:
-            flagged_days.append({'date': d['date'], 'actual': d['usage'], 'expected': d['expected']})
+            flagged_days.append({'date': d['date'], 'actual': d['metered'], 'expected': exp})
 
     fit = model.fits.get(month_start)
     if fit is None:

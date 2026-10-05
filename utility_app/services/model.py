@@ -45,7 +45,7 @@ from utility_app.services.weather_service import (
 
 # Inputs each utility's usage is explained by
 INPUTS = {
-    'gas': ('hdd', 'sun_hdd', 'sun_wed'),
+    'gas': ('hdd', 'sun_hdd'),
     'electricity': ('hdd', 'cdd', 'event', 'solar', 'sun_wed'),
     'water': ('occupancy', 'sun_wed'),
 }
@@ -58,6 +58,15 @@ INPUT_LABELS = {
     'sun_wed': 'on Sun–Wed',
     'event': 'per point of event load',
 }
+# Weekend meter reads are taken 2 hours late, so a usage day doesn't always
+# span 24 hours: Friday's runs to the late Saturday read (26 h) and Sunday's
+# from the late Sunday read to the normal Monday read (22 h). Weekday number
+# (Mon=0) -> hours the usage day spans; any other day spans 24 h.
+READ_SPAN_HOURS = {4: 26.0, 6: 22.0}
+# Utilities whose usage is spread evenly enough over the day to be scaled to
+# 24 hours. Water isn't: the shifted early-morning hours use little of it.
+SPAN_CORRECTED = ('gas', 'electricity')
+
 # Inputs that come from the downloaded weather
 WEATHER_INPUTS = {'hdd', 'cdd', 'temp', 'sun_hdd', 'solar'}
 # Inputs that can be unknown on a day (not uploaded): they are learned only
@@ -153,7 +162,7 @@ class ConsumptionModel:
     def __init__(self, utility: str):
         self.utility = utility
         self.inputs = INPUTS[utility]
-        self.days = []            # dicts: date, usage, inputs, good, held, expected, flagged, mode
+        self.days = []            # dicts: date, usage (per 24 h), metered, hours, inputs, good, held, expected, flagged, mode
         self.confirmed = sorted(
             date.fromisoformat(r.start_date) for r in ConfirmedRise.query.filter_by(utility=utility)
         )
@@ -182,13 +191,19 @@ class ConsumptionModel:
         if occupancy:
             self.typical['occupancy'] = sum(occupancy.values()) / len(occupancy)
 
-        good = mark_outliers([r[diff_key] for r in usage])
-        for r, is_good in zip(usage, good):
+        # The model works in usage per 24 hours; 'metered' is what the meters show
+        days = [date.fromisoformat(r['date']) for r in usage]
+        hours = [READ_SPAN_HOURS.get(day.weekday(), 24.0) if self.utility in SPAN_CORRECTED else 24.0 for day in days]
+        per_day = [float(r[diff_key]) * 24.0 / h for r, h in zip(usage, hours)]
+
+        good = mark_outliers(per_day)
+        for r, day, h, value, is_good in zip(usage, days, hours, per_day, good):
             w = weather.get(r['date'])
-            day = date.fromisoformat(r['date'])
             self.days.append({
                 'date': day,
-                'usage': float(r[diff_key]),
+                'usage': value,
+                'metered': float(r[diff_key]),
+                'hours': h,
                 'inputs': day_inputs(day, w, events.get(r['date']), occupancy.get(r['date'])),
                 'good': is_good,
                 'held': False,
@@ -445,3 +460,8 @@ class ConsumptionModel:
 def run_model(utility: str) -> ConsumptionModel:
     """Builds the model for one utility ('electricity', 'gas' or 'water')."""
     return ConsumptionModel(utility).run()
+
+
+def metered_expected(day: dict):
+    """A day's expected usage over the hours its reads actually span, comparable with the meter."""
+    return None if day['expected'] is None else day['expected'] * day['hours'] / 24.0
