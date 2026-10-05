@@ -67,6 +67,11 @@ READ_SPAN_HOURS = {4: 26.0, 6: 22.0}
 # 24 hours. Water isn't: the shifted early-morning hours use little of it.
 SPAN_CORRECTED = ('gas', 'electricity')
 
+# Heating responds to the last few days, not just today: for these utilities
+# heating degree-days use a weighted mean temperature of today, yesterday and
+# the day before. Electricity's cooling responds the same day, so it doesn't.
+HEATING_TEMP_WEIGHTS = {'gas': (0.7, 0.2, 0.1)}
+
 # Inputs that come from the downloaded weather
 WEATHER_INPUTS = {'hdd', 'cdd', 'temp', 'sun_hdd', 'solar'}
 # Inputs that can be unknown on a day (not uploaded): they are learned only
@@ -114,10 +119,12 @@ def shift_months(day: date, months: int) -> date:
     return date(day.year + years, month_index + 1, 1)
 
 
-def day_inputs(day: date, weather, event_load, occupancy):
+def day_inputs(day: date, weather, event_load, occupancy, heating_temp=None):
     """
     Every model input for one day. Weather inputs are None when the day's
     weather isn't downloaded; event and occupancy are None when not uploaded.
+    heating_temp, when given, is the temperature heating degree-days use
+    instead of the day's own mean.
     """
     inputs = {
         'sun_wed': 1.0 if day.weekday() in LOW_DAYS else 0.0,
@@ -127,15 +134,23 @@ def day_inputs(day: date, weather, event_load, occupancy):
     }
     if weather:
         temp = weather['temp_mean']
+        hdd = heating_degree_days(temp if heating_temp is None else heating_temp)
         inputs.update({
-            'hdd': heating_degree_days(temp),
+            'hdd': hdd,
             'cdd': cooling_degree_days(temp),
             'temp': temp,
             # Sun only saves gas when there is heating to save: none on a warm day
-            'sun_hdd': weather['sunshine_hours'] * heating_degree_days(temp),
+            'sun_hdd': weather['sunshine_hours'] * hdd,
             'solar': weather['solar_mj'],
         })
     return inputs
+
+
+def weighted_temp(day: date, weather: dict, weights):
+    """Weighted mean temperature of `day` and the days before it (weights[0] is today), from those known."""
+    known = [(w, weather.get((day - timedelta(days=k)).isoformat())) for k, w in enumerate(weights)]
+    known = [(w, x['temp_mean']) for w, x in known if x is not None]
+    return sum(w * t for w, t in known) / sum(w for w, _ in known) if known else None
 
 
 def mark_outliers(values: list) -> list:
@@ -184,8 +199,9 @@ class ConsumptionModel:
         start, end = date.fromisoformat(first), date.today()
         diff_key = METERS[self.utility][0]
         usage = [r for r in get_daily_usage(start, end) if r[diff_key] is not None]
-        # Only download weather for utilities that use it
-        weather = get_weather_range(start, end) if set(self.inputs) & WEATHER_INPUTS else {}
+        # Only download weather for utilities that use it (from 2 days earlier,
+        # for the weighted heating temperature)
+        weather = get_weather_range(start - timedelta(days=2), end) if set(self.inputs) & WEATHER_INPUTS else {}
         events = get_event_loads(start, end)
         occupancy = get_occupancy(start, end)
         if occupancy:
@@ -197,14 +213,16 @@ class ConsumptionModel:
         per_day = [float(r[diff_key]) * 24.0 / h for r, h in zip(usage, hours)]
 
         good = mark_outliers(per_day)
+        weights = HEATING_TEMP_WEIGHTS.get(self.utility)
         for r, day, h, value, is_good in zip(usage, days, hours, per_day, good):
             w = weather.get(r['date'])
+            heating_temp = weighted_temp(day, weather, weights) if weights and w else None
             self.days.append({
                 'date': day,
                 'usage': value,
                 'metered': float(r[diff_key]),
                 'hours': h,
-                'inputs': day_inputs(day, w, events.get(r['date']), occupancy.get(r['date'])),
+                'inputs': day_inputs(day, w, events.get(r['date']), occupancy.get(r['date']), heating_temp),
                 'good': is_good,
                 'held': False,
                 'expected': None,
