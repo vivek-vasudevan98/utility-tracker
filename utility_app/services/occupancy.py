@@ -1,5 +1,4 @@
 from datetime import date
-import pandas as pd
 from flask import current_app
 from utility_app import db
 from utility_app.models import OccupancyDay
@@ -12,6 +11,8 @@ def import_occupancy_file(file_storage):
     was stored for it. Blank cells mean "not known" and change nothing.
     Returns: (category, message) where category is a flash category.
     """
+    # pandas is only needed for uploads; loading it here keeps the running app ~40 MB smaller
+    import pandas as pd
     try:
         frames = []
         for df in pd.read_excel(file_storage, sheet_name=None).values():

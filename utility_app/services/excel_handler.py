@@ -1,4 +1,3 @@
-import pandas as pd
 from flask import current_app
 from utility_app import db
 from utility_app.services.calculations import METERS
@@ -9,6 +8,7 @@ MAX_LISTED_REJECTIONS = 5
 
 def _cell_value(cell):
     """Blank cells (NaN/NaT/None) become None; anything else must be a number."""
+    import pandas as pd   # already loaded by the upload that calls this
     if pd.isna(cell):
         return None
     return float(cell)
@@ -23,6 +23,8 @@ def process_excel_upload(file_storage, target_month=None):
     Returns: (category, message) where category is a flash category:
     'success', 'info' (imported with rejected readings) or 'danger' (failed).
     """
+    # pandas is only needed for uploads; loading it here keeps the running app ~40 MB smaller
+    import pandas as pd
     try:
         df = pd.read_excel(file_storage)
         df.columns = [str(col).strip().lower() for col in df.columns]

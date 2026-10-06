@@ -1,5 +1,4 @@
 from datetime import date, timedelta
-import pandas as pd
 from flask import current_app
 from utility_app import db
 from utility_app.models import EventDay
@@ -12,6 +11,8 @@ def import_event_file(file_storage):
     days replace anything stored before; days outside the file are untouched.
     Returns: (category, message) where category is a flash category.
     """
+    # pandas is only needed for uploads; loading it here keeps the running app ~40 MB smaller
+    import pandas as pd
     try:
         df = pd.read_excel(file_storage)
         df.columns = [str(col).strip().lower() for col in df.columns]

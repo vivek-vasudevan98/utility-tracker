@@ -1,0 +1,32 @@
+{
+    // Keep VS Code out of folders it never needs to watch, search or index.
+    // The virtual environment holds thousands of package files (pandas, numpy),
+    // and instance/ holds the SQLite database, which changes on every save.
+    "files.watcherExclude": {
+        "**/venv/**": true,
+        "**/.venv/**": true,
+        "**/instance/**": true,
+        "**/__pycache__/**": true,
+        "**/.git/objects/**": true
+    },
+    "search.exclude": {
+        "**/venv": true,
+        "**/.venv": true,
+        "**/instance": true,
+        "**/__pycache__": true
+    },
+    "files.exclude": {
+        "**/__pycache__": true
+    },
+
+    // Python language server (Pylance): check only the files that are open,
+    // and don't index installed packages beyond what the code imports.
+    "python.analysis.diagnosticMode": "openFilesOnly",
+    "python.analysis.indexing": false,
+    "python.analysis.exclude": [
+        "**/venv",
+        "**/.venv",
+        "**/instance",
+        "**/__pycache__"
+    ]
+}
