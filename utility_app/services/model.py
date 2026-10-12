@@ -34,9 +34,8 @@ Two passes over the history:
 from datetime import date, timedelta
 from statistics import median
 import numpy as np
-from utility_app import db
-from utility_app.models import UtilityEntry, ConfirmedRise
-from utility_app.services.calculations import METERS, get_daily_usage
+from utility_app.models import ConfirmedRise
+from utility_app.services.daily_usage import get_usage, first_usage_date
 from utility_app.services.events import get_event_loads
 from utility_app.services.occupancy import get_occupancy
 from utility_app.services.weather_service import (
@@ -193,12 +192,10 @@ class ConsumptionModel:
     # ---------- data ----------
 
     def load(self):
-        first = db.session.query(db.func.min(UtilityEntry.date)).scalar()
-        if first is None:
+        start, end = first_usage_date(self.utility), date.today()
+        if start is None:
             return
-        start, end = date.fromisoformat(first), date.today()
-        diff_key = METERS[self.utility][0]
-        usage = [r for r in get_daily_usage(start, end) if r[diff_key] is not None]
+        usage = get_usage(self.utility, start, end)
         # Only download weather for utilities that use it (from 2 days earlier,
         # for the weighted heating temperature)
         weather = get_weather_range(start - timedelta(days=2), end) if set(self.inputs) & WEATHER_INPUTS else {}
@@ -207,21 +204,31 @@ class ConsumptionModel:
         if occupancy:
             self.typical['occupancy'] = sum(occupancy.values()) / len(occupancy)
 
-        # The model works in usage per 24 hours; 'metered' is what the meters show
+        # The model works in usage per 24 hours; 'metered' is the day's figure as
+        # recorded. Supplier days always run midnight to midnight; meter-read
+        # days span the hours between two morning reads.
+        def span(day, source):
+            if source == 'supplier' or self.utility not in SPAN_CORRECTED:
+                return 24.0
+            return READ_SPAN_HOURS.get(day.weekday(), 24.0)
         days = [date.fromisoformat(r['date']) for r in usage]
-        hours = [READ_SPAN_HOURS.get(day.weekday(), 24.0) if self.utility in SPAN_CORRECTED else 24.0 for day in days]
-        per_day = [float(r[diff_key]) * 24.0 / h for r, h in zip(usage, hours)]
+        hours = [span(day, r['source']) for day, r in zip(days, usage)]
+        per_day = [r['amount'] * 24.0 / h for r, h in zip(usage, hours)]
 
         good = mark_outliers(per_day)
         weights = HEATING_TEMP_WEIGHTS.get(self.utility)
         for r, day, h, value, is_good in zip(usage, days, hours, per_day, good):
             w = weather.get(r['date'])
             heating_temp = weighted_temp(day, weather, weights) if weights and w else None
+            meter = r['meter_amount']
             self.days.append({
                 'date': day,
                 'usage': value,
-                'metered': float(r[diff_key]),
+                'metered': r['amount'],
                 'hours': h,
+                'source': r['source'],
+                # The meter-read figure per 24 h, also on days judged on supplier data
+                'meter_usage': None if meter is None else meter * 24.0 / span(day, 'meter'),
                 'inputs': day_inputs(day, w, events.get(r['date']), occupancy.get(r['date']), heating_temp),
                 'good': is_good,
                 'held': False,
@@ -234,7 +241,19 @@ class ConsumptionModel:
 
     def has_inputs(self, day: dict) -> bool:
         """True when every input this utility needs, apart from optional ones, is known."""
-        return all(day['inputs'][n] is not None for n in self.inputs if n not in OPTIONAL_INPUTS)
+        return day['complete']
+
+    def index_days(self):
+        """Arrays over self.days that training works from (it runs once per tested step date)."""
+        for d in self.days:
+            d['complete'] = all(d['inputs'][n] is not None for n in self.inputs if n not in OPTIONAL_INPUTS)
+        self._ordinal = np.array([d['date'].toordinal() for d in self.days], dtype=np.int64)
+        self._good = np.array([d['good'] and d['complete'] for d in self.days], dtype=bool)
+        self._usage = np.array([d['usage'] for d in self.days], dtype=float)
+        self._values = {
+            n: np.array([np.nan if d['inputs'][n] is None else d['inputs'][n] for d in self.days], dtype=float)
+            for n in self.inputs
+        }
 
     def stretch_start(self, day: date, boundaries=None):
         starts = [b for b in (self.boundaries if boundaries is None else boundaries) if b <= day]
@@ -246,37 +265,38 @@ class ConsumptionModel:
         with one level per stretch between `boundaries` (default: the steps found).
         """
         boundaries = self.boundaries if boundaries is None else boundaries
-        rows = [d for d in self.days
-                if start <= d['date'] < end and d['good'] and not d['held'] and self.has_inputs(d)]
+        if not self.days:
+            return None, 0
+        held = np.fromiter((d['held'] for d in self.days), dtype=bool, count=len(self.days))
+        rows = (self._good & ~held & (self._ordinal >= start.toordinal())
+                & (self._ordinal < end.toordinal()))
 
         used = []
         for name in self.inputs:
+            values = self._values[name]
             candidate = rows
             if name in OPTIONAL_INPUTS:
-                candidate = [d for d in rows if d['inputs'][name] is not None]
-                if len(candidate) < MIN_TRAINING_DAYS:
+                candidate = rows & ~np.isnan(values)
+                if candidate.sum() < MIN_TRAINING_DAYS:
                     continue      # not enough of it uploaded yet: leave it out
-            if name not in LEVEL_INPUTS and sum(d['inputs'][name] > 0 for d in candidate) < MIN_ACTIVE_DAYS:
+            if name not in LEVEL_INPUTS and (values[candidate] > 0).sum() < MIN_ACTIVE_DAYS:
                 continue
             rows = candidate
             used.append(name)
         # Re-check against the (possibly smaller) set of rows: an input that never varies can't be learned
-        used = [n for n in used if np.ptp([d['inputs'][n] for d in rows] or [0]) > 0]
+        used = [n for n in used if rows.any() and np.ptp(self._values[n][rows]) > 0]
 
-        if len(rows) < MIN_TRAINING_DAYS or not used:
-            return None, len(rows)
+        count = int(rows.sum())
+        if count < MIN_TRAINING_DAYS or not used:
+            return None, count
 
         # One level per baseline stretch, so step changes don't leak into the effects
-        row_stretch = [self.stretch_start(d['date'], boundaries) for d in rows]
-        stretches = sorted(set(row_stretch))
-        matrix = np.array([
-            [1.0 if rs == s else 0.0 for s in stretches]
-            + [d['inputs'][n] for n in used]
-            for d, rs in zip(rows, row_stretch)
-        ])
-        target = np.array([d['usage'] for d in rows])
-        coefs, *_ = np.linalg.lstsq(matrix, target, rcond=None)
-        return dict(zip(used, coefs[len(stretches):].tolist())), len(rows)
+        cuts = np.array(sorted(b.toordinal() for b in boundaries), dtype=np.int64)
+        stretch = np.searchsorted(cuts, self._ordinal[rows], side='right')
+        levels = (stretch[:, None] == np.unique(stretch)[None, :]).astype(float)
+        matrix = np.hstack([levels] + [self._values[n][rows][:, None] for n in used])
+        coefs, *_ = np.linalg.lstsq(matrix, self._usage[rows], rcond=None)
+        return dict(zip(used, coefs[levels.shape[1]:].tolist())), count
 
     def effect(self, day: dict, effects: dict) -> float:
         if not effects:
@@ -425,7 +445,7 @@ class ConsumptionModel:
         effects, training_days = self.train(window_start, window_end)
 
         eval_from = month_start - timedelta(days=EVALUATION_DAYS)
-        model_miss, plain_miss, learning_miss = [], [], []
+        model_miss, plain_miss, learning_miss, sources = [], [], [], []
         for j in range(i - 1, -1, -1):
             d = self.days[j]
             if d['date'] < eval_from:
@@ -439,11 +459,14 @@ class ConsumptionModel:
                 continue
             plain_miss.append(d['usage'] - plain)
             learning_miss.append(d['usage'] - learning)
+            sources.append(d['source'])
             if effects:
                 model_miss.append(d['usage'] - modelled)
 
         enough = len(plain_miss) >= MIN_EVALUATION_READS
         use_model = bool(effects) and enough and rms(model_miss) < rms(plain_miss)
+        chosen = model_miss if use_model else learning_miss
+        supplier_miss = [m for m, src in zip(chosen, sources) if src == 'supplier']
         self.fit = {
             'month': month_start,
             'effects': effects,
@@ -453,9 +476,32 @@ class ConsumptionModel:
             'model_miss': rms(model_miss) if model_miss else None,
             'plain_miss': rms(plain_miss) if plain_miss else None,
             'evaluation_reads': len(plain_miss),
-            'typical_miss': (rms(model_miss) if use_model else rms(learning_miss)) if enough else None,
+            'typical_miss': rms(chosen) if enough else None,
+            # Separate flag bands once supplier data is in use: supplier days
+            # (midnight to midnight) are much steadier than meter-read days
+            'supplier_typical_miss': rms(supplier_miss) if len(supplier_miss) >= MIN_EVALUATION_READS else None,
+            'meter_typical_miss': self.meter_typical_miss(i, month_start),
         }
         self.fits[month_start] = self.fit
+
+    def meter_typical_miss(self, i: int, month_start: date):
+        """
+        How far meter-read days usually miss expected, from the last year's days
+        that have a meter-read figure and an expectation (supplier-judged days
+        included, comparing their meter-read figure). None without supplier data
+        or with too few such days, in which case the overall band applies.
+        """
+        if not any(d['source'] == 'supplier' for d in self.days):
+            return None
+        since = month_start - timedelta(days=365)
+        misses = [d['meter_usage'] - d['expected'] for d in self.days[:i]
+                  if d['date'] >= since and d['meter_usage'] is not None and d['expected'] is not None and d['good'] and not d['held']]
+        return rms(misses) if len(misses) >= MIN_EVALUATION_READS else None
+
+    def flag_band(self, day: dict):
+        """The typical miss a day is judged against: its source's own when known."""
+        band = self.fit['meter_typical_miss'] if day['source'] == 'meter' else self.fit['supplier_typical_miss']
+        return band or self.fit['typical_miss']
 
     def judge(self):
         for i, day in enumerate(self.days):
@@ -464,12 +510,13 @@ class ConsumptionModel:
             effects = self.fit['effects'] if self.fit['mode'] == 'model' else self.step_effects
             day['expected'] = self.expected(i, effects)
             day['mode'] = self.fit['mode']
-            typical = self.fit['typical_miss']
+            typical = self.flag_band(day)
             if day['expected'] is not None and typical:
                 day['flagged'] = abs(day['usage'] - day['expected']) > FLAG_MULTIPLE * typical
 
     def run(self):
         self.load()
+        self.index_days()
         self.find_steps()
         self.judge()
         return self

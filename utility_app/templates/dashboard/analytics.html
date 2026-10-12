@@ -211,9 +211,16 @@
         {% if m.has_expected %}
             <p><strong style="font-size: 1.1rem;">{{ "{:+.1%}".format(m.month_change) }}</strong>
                <span class="model-note">({{ "{:,.0f}".format(m.month_actual) }} actual vs {{ "{:,.0f}".format(m.month_expected) }} {{ data.unit }} expected, on days with both)</span></p>
-            {% if m.flag_band %}
+            {% if m.sources.supplier %}
+                <p class="model-note">{{ m.sources.supplier }} day(s) from supplier data{% if m.sources.meter %}, {{ m.sources.meter }} from meter reads{% endif %}.</p>
+            {% endif %}
+            {% if m.flag_band and (m.sources.supplier or not m.meter_flag_band) %}
                 <p class="model-note">Days are flagged beyond &plusmn;{{ "{:,.0f}".format(m.flag_band) }} {{ data.unit }}
                    (twice the typical miss of {{ "{:,.0f}".format(m.typical_miss) }}).</p>
+            {% endif %}
+            {% if m.meter_flag_band and m.sources.meter %}
+                <p class="model-note">Meter-read days are flagged beyond &plusmn;{{ "{:,.0f}".format(m.meter_flag_band) }} {{ data.unit }}:
+                   varying reading times make them less exact than supplier data.</p>
             {% endif %}
             {% if m.flagged_days %}
                 <ul>

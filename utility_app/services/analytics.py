@@ -3,7 +3,7 @@ import calendar
 from datetime import date
 from utility_app import db
 from utility_app.models import MonthlyUtilityBill, ConfirmedRise
-from utility_app.services.calculations import get_month_records, get_month_usage
+from utility_app.services.daily_usage import get_usage, month_usage
 from utility_app.services.model import (
     run_model, metered_expected, INPUT_LABELS, FLAG_MULTIPLE, HOLDOUT_MONTHS
 )
@@ -27,7 +27,7 @@ def sync_completed_month_bill(month_str: str):
     total_days = get_days_in_month(year, month)
     month_start, month_end = date(year, month, 1), date(year, month, total_days)
 
-    usage = {m: get_month_usage(m, month_start, month_end) for m in ('electricity', 'gas', 'water')}
+    usage = {m: month_usage(m, month_start, month_end) for m in ('electricity', 'gas', 'water')}
     if not all(u['complete'] for u in usage.values()):
         return
 
@@ -89,9 +89,9 @@ def get_dashboard_metrics(target_month: str) -> dict:
     year, month = map(int, target_month.split('-'))
     total_days = get_days_in_month(year, month)
     
-    # 1. Month-to-date usage per meter, pro-rated across gaps in the readings
+    # 1. Month-to-date usage per utility: daily usage, or the registers pro-rated across gaps
     usage = {
-        m: get_month_usage(m, date(year, month, 1), date(year, month, total_days))
+        m: month_usage(m, date(year, month, 1), date(year, month, total_days))
         for m in ('electricity', 'gas', 'water')
     }
     mtd = {m: u['total'] or 0 for m, u in usage.items()}
@@ -153,32 +153,31 @@ def get_utility_daily_comparison(utility: str, target_month: str) -> dict:
       - The consumption model's expected usage and flagged days
     """
     attr_map = {
-        'electricity': ('diff_elec', 'electricity_kwh', 'kWh', '#eab308'),
-        'gas': ('diff_gas', 'gas_kwh', 'kWh', '#f97316'),
-        'water': ('diff_water', 'water_m3', 'm³', '#0284c7')
+        'electricity': ('electricity_kwh', 'kWh', '#eab308'),
+        'gas': ('gas_kwh', 'kWh', '#f97316'),
+        'water': ('water_m3', 'm³', '#0284c7')
     }
     
     if utility not in attr_map:
         utility = 'electricity'
         
-    diff_key, bill_col, unit, color = attr_map[utility]
+    bill_col, unit, color = attr_map[utility]
     year, month = map(int, target_month.split('-'))
     total_days = get_days_in_month(year, month)
     
-    # 1. Target Month Daily Series
-    cur_records = get_month_records(target_month)
-    cur_map = {int(r['date'].split('-')[2]): r[diff_key] for r in cur_records if r[diff_key] is not None}
-    
-    # 2. Prior Month Keys
+    def day_map(month_str):
+        """Day of month -> daily usage for month_str (YYYY-MM), from daily_usage."""
+        y, m = map(int, month_str.split('-'))
+        rows = get_usage(utility, date(y, m, 1), date(y, m, get_days_in_month(y, m)))
+        return {int(r['date'][8:]): math.ceil(r['amount']) for r in rows}
+
+    # 1. Target month, 2. prior month (MoM), 3. same month last year (YoY)
+    cur_map = day_map(target_month)
     prev_m_str = f"{year - 1}-12" if month == 1 else f"{year}-{str(month - 1).zfill(2)}"
-    prev_m_records = get_month_records(prev_m_str)
-    prev_m_map = {int(r['date'].split('-')[2]): r[diff_key] for r in prev_m_records if r[diff_key] is not None}
-    
-    # 3. Prior Year Keys
+    prev_m_map = day_map(prev_m_str)
     prev_y_str = f"{year - 1}-{str(month).zfill(2)}"
-    prev_y_records = get_month_records(prev_y_str)
-    prev_y_map = {int(r['date'].split('-')[2]): r[diff_key] for r in prev_y_records if r[diff_key] is not None}
-    
+    prev_y_map = day_map(prev_y_str)
+
     # Check for macro statement fallback
     prev_m_bill = MonthlyUtilityBill.query.filter_by(month=prev_m_str).first()
     prev_y_bill = MonthlyUtilityBill.query.filter_by(month=prev_y_str).first()
@@ -266,8 +265,12 @@ def get_model_view(utility: str, target_month: str, unit: str) -> dict:
     flagged = [False] * total_days
     actual_sum = expected_sum = 0.0
     flagged_days = []
+    sources = {'supplier': 0, 'meter': 0}
     for d in model.days:
-        if d['date'].strftime('%Y-%m') != target_month or d['expected'] is None:
+        if d['date'].strftime('%Y-%m') != target_month:
+            continue
+        sources[d['source']] += 1
+        if d['expected'] is None:
             continue
         # Shown as metered: expected over the hours the day's reads span
         exp = metered_expected(d)
@@ -289,6 +292,8 @@ def get_model_view(utility: str, target_month: str, unit: str) -> dict:
     else:
         status, effects = 'plain', None
 
+    typical = (fit.get('supplier_typical_miss') or fit['typical_miss']) if fit else None
+
     confirmed = ConfirmedRise.query.filter_by(utility=utility).order_by(ConfirmedRise.start_date).all()
     return {
         'status': status,
@@ -298,8 +303,11 @@ def get_model_view(utility: str, target_month: str, unit: str) -> dict:
         'flagged': flagged,
         'flagged_days': flagged_days,
         'has_expected': any(v is not None for v in expected),
-        'typical_miss': fit['typical_miss'] if fit else None,
-        'flag_band': fit['typical_miss'] * FLAG_MULTIPLE if fit and fit['typical_miss'] else None,
+        'typical_miss': typical,
+        'flag_band': typical * FLAG_MULTIPLE if typical else None,
+        # Meter-read days get their own, wider band once supplier data is in use
+        'meter_flag_band': fit['meter_typical_miss'] * FLAG_MULTIPLE if fit and fit.get('meter_typical_miss') else None,
+        'sources': sources,
         'month_actual': actual_sum,
         'month_expected': expected_sum,
         'month_change': actual_sum / expected_sum - 1 if expected_sum else None,

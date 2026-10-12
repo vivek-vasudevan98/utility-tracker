@@ -1,7 +1,9 @@
+from datetime import timedelta
 from flask import current_app
 from utility_app import db
 from utility_app.services.calculations import METERS
 from utility_app.services.readings import save_reading
+from utility_app.services.daily_usage import refresh_meter_usage
 
 # How many rejected readings to list in the upload message
 MAX_LISTED_REJECTIONS = 5
@@ -40,6 +42,7 @@ def process_excel_upload(file_storage, target_month=None):
 
         counts = {'added': 0, 'updated': 0, 'unchanged': 0, 'skipped': 0}
         rejections = []
+        changed_days = []
 
         for _, row in df.iterrows():
             parsed_date = row['date'].strftime('%Y-%m-%d')
@@ -58,7 +61,12 @@ def process_excel_upload(file_storage, target_month=None):
             status, rejected = save_reading(parsed_date, values)
             counts[status] += 1
             rejections.extend(rejected)
+            if status in ('added', 'updated'):
+                changed_days.append(row['date'].date())
 
+        # A reading changes its own day's usage and the day before's
+        if changed_days:
+            refresh_meter_usage(min(changed_days) - timedelta(days=1), max(changed_days))
         db.session.commit()
 
         message = (

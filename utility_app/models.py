@@ -23,6 +23,25 @@ class MonthlyUtilityBill(db.Model):
     def __repr__(self):
         return f"<MonthlyUtilityBill {self.month}>"
 
+class DailyUsage(db.Model):
+    """
+    Each utility's usage per day, from one source:
+      - 'meter': worked out from the daily morning meter readings (the day's
+        usage runs from that morning's reading to the next morning's)
+      - 'supplier': the supplier's own daily data, midnight to midnight
+    A day can have both; the supplier figure is preferred when present.
+    """
+    __tablename__ = 'daily_usage'
+    __table_args__ = (db.UniqueConstraint('date', 'utility', 'source'),)
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.String(10), nullable=False, index=True)   # Format: "YYYY-MM-DD"
+    utility = db.Column(db.String(20), nullable=False)            # 'electricity', 'gas' or 'water'
+    source = db.Column(db.String(10), nullable=False)             # 'meter' or 'supplier'
+    amount = db.Column(db.Float, nullable=False)                  # kWh (electricity, gas) or m³ (water)
+
+    def __repr__(self):
+        return f"<DailyUsage {self.date} {self.utility} {self.source}: {self.amount}>"
+
 class DailyWeather(db.Model):
     """Daily weather downloaded from Open-Meteo (a cache: it can always be re-downloaded)."""
     __tablename__ = 'daily_weather'

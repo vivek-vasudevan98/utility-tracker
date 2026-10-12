@@ -84,6 +84,36 @@
 
         <div class="card">
             <div class="card-header">
+                <div class="card-title">Supplier Daily Data</div>
+                <div class="card-subtitle">
+                    {% if supplier_coverage %}
+                        {% for utility, stretches in supplier_coverage.items() %}
+                            {{ utility|capitalize }}:
+                            {% for first, last in stretches %}{{ first.strftime('%d %b %Y') }} – {{ last.strftime('%d %b %Y') }}{{ ", " if not loop.last else "." }}{% endfor %}<br>
+                        {% endfor %}
+                        Used instead of meter-read usage on these days.
+                    {% else %}
+                        No supplier data uploaded yet.
+                    {% endif %}
+                </div>
+            </div>
+
+            <form action="{{ url_for('entry.upload_supplier') }}" method="POST" enctype="multipart/form-data">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="selected_month" value="{{ selected_month }}">
+
+                <div class="form-group" style="margin-bottom: 1.25rem;">
+                    <label for="supplier_file">Select Export (.csv, .xlsx, .xls):</label>
+                    <input type="file" id="supplier_file" name="supplier_file" accept=".csv, .xlsx, .xls" required>
+                    <span class="input-hint">The electricity half-hourly export or the gas AMR consumption export, as downloaded. Daily kWh, midnight to midnight. Re-uploading replaces the days the file covers.</span>
+                </div>
+
+                <button type="submit" class="btn btn-secondary" style="width: 100%;">Upload Supplier Data</button>
+            </form>
+        </div>
+
+        <div class="card">
+            <div class="card-header">
                 <div class="card-title">Event Load</div>
                 <div class="card-subtitle">
                     {% if event_coverage %}

@@ -6,7 +6,9 @@ from utility_app.services.calculations import METERS
 from utility_app.services.excel_handler import process_excel_upload
 from utility_app.services.events import import_event_file, event_coverage
 from utility_app.services.occupancy import import_occupancy_file, occupancy_coverage
+from utility_app.services.supplier_data import import_supplier_file, supplier_coverage
 from utility_app.services.readings import save_reading
+from utility_app.services.daily_usage import refresh_meter_usage
 from utility_app.services.months import normalize_month
 from utility_app.services.analytics import sync_completed_month_bill
 
@@ -38,7 +40,8 @@ def index():
         return redirect(url_for('entry.index'))
     return render_template('entry/index.html', selected_month=selected_month,
                            event_coverage=event_coverage(),
-                           occupancy_coverage=occupancy_coverage())
+                           occupancy_coverage=occupancy_coverage(),
+                           supplier_coverage=supplier_coverage())
 
 @entry_bp.route('/add', methods=['POST'])
 def add():
@@ -65,6 +68,10 @@ def add():
 
     try:
         status, rejections = save_reading(date, values)
+        if status in ('added', 'updated'):
+            # A reading changes its own day's usage and the day before's
+            day = date_cls.fromisoformat(date)
+            refresh_meter_usage(day - timedelta(days=1), day)
         db.session.commit()
     except SQLAlchemyError:
         db.session.rollback()
@@ -86,14 +93,14 @@ def add():
 
     return redirect(url_for('entry.index', month=month_prefix))
 
-def uploaded_excel_file(field: str):
-    """The uploaded file in `field`, or None (with a message flashed) if it's missing or not Excel."""
+def uploaded_excel_file(field: str, extensions=ALLOWED_UPLOAD_EXTENSIONS):
+    """The uploaded file in `field`, or None (with a message flashed) if it's missing or of the wrong type."""
     file = request.files.get(field)
     if file is None or file.filename == '':
         flash("No file selected.", "danger")
         return None
-    if not file.filename.lower().endswith(ALLOWED_UPLOAD_EXTENSIONS):
-        flash("Upload an Excel file (.xlsx or .xls).", "danger")
+    if not file.filename.lower().endswith(extensions):
+        flash(f"Upload a {' or '.join(extensions)} file.", "danger")
         return None
     return file
 
@@ -132,5 +139,14 @@ def upload_occupancy():
     file = uploaded_excel_file('occupancy_file')
     if file is not None:
         category, msg = import_occupancy_file(file)
+        flash(msg, category)
+    return redirect(url_for('entry.index', month=month))
+
+@entry_bp.route('/supplier', methods=['POST'])
+def upload_supplier():
+    month = normalize_month(request.form.get('selected_month', '')) or ''
+    file = uploaded_excel_file('supplier_file', ('.csv',) + ALLOWED_UPLOAD_EXTENSIONS)
+    if file is not None:
+        category, msg = import_supplier_file(file, file.filename)
         flash(msg, category)
     return redirect(url_for('entry.index', month=month))

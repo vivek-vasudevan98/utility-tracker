@@ -82,4 +82,10 @@ def create_app():
         db.session.commit()
         db.create_all()
 
+        # First run with the daily_usage table: fill it from the stored readings
+        from utility_app.services.daily_usage import rebuild_meter_usage
+        if not models.DailyUsage.query.filter_by(source='meter').first() and models.UtilityEntry.query.first():
+            rebuild_meter_usage()
+            db.session.commit()
+
     return app
