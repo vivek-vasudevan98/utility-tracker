@@ -6,3 +6,5 @@ pandas>=2.0
 numpy>=1.24       # least-squares fitting in the consumption model
 openpyxl>=3.1      # read .xlsx uploads via pandas.read_excel
 xlrd>=2.0          # read legacy .xls uploads via pandas.read_excel
+defusedxml>=0.7    # openpyxl uses it to parse uploaded .xlsx files safely
+waitress>=3.0      # web server used by serve.py

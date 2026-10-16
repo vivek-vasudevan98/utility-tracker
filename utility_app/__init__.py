@@ -30,9 +30,11 @@ def load_secret_key(instance_dir: str) -> str:
 def create_app():
     app = Flask(__name__)
 
-    # Absolute path to instance/utilities.db in project root
+    # Data folder (database and secret key): UTILITY_TRACKER_DATA when set (the
+    # Windows install keeps it apart from the program files, so updates never
+    # touch it), otherwise instance/ in the project root
     base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    instance_dir = os.path.join(base_dir, 'instance')
+    instance_dir = os.environ.get('UTILITY_TRACKER_DATA') or os.path.join(base_dir, 'instance')
     os.makedirs(instance_dir, exist_ok=True)
 
     app.secret_key = load_secret_key(instance_dir)
@@ -62,6 +64,11 @@ def create_app():
     def handle_too_large(e):
         flash(f"That file is too large; uploads are limited to {MAX_UPLOAD_MB} MB.", "danger")
         return redirect(url_for('entry.index'))
+
+    @app.route('/healthz')
+    def healthz():
+        # Lets the launcher tell a running Utility Tracker from anything else on the port
+        return 'utility-tracker', 200, {'Content-Type': 'text/plain'}
 
     # Register Blueprints
     from utility_app.blueprints.dashboard.routes import dashboard_bp
